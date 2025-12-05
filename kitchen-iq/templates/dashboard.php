@@ -51,8 +51,18 @@
                             <option value="2">2 people</option>
                             <option value="3">3 people</option>
                             <option value="4">4 people</option>
-                            <option value="5">5+ people</option>
+                            <option value="5">5 people</option>
+                            <option value="6">6 people</option>
+                            <option value="7">7 people</option>
+                            <option value="8">8 people</option>
+                            <option value="9">9+ people</option>
                         </select>
+                    </div>
+
+                    <div class="kiq-form-group">
+                        <label for="household_members">Household members</label>
+                        <div id="kiq-members-container" style="margin-top:8px;"></div>
+                        <small class="text-muted">Name each member and set appetite (1-5), allergies, intolerances, and dislikes.</small>
                     </div>
 
                     <div class="kiq-form-group">
@@ -205,12 +215,16 @@
                 <button id="kiq-update-pantry-btn" class="btn btn-secondary" style="margin-left: 10px;">
                     📸 Update Pantry First
                 </button>
+                <button id="kiq-more-ideas-btn" class="btn btn-outline" style="margin-left: 10px;">
+                    🔁 More ideas
+                </button>
             </div>
         </div>
 
         <div id="kiq-meal-results" class="kiq-meal-results">
             <p class="text-muted">Click "Generate Meals" to see suggestions</p>
         </div>
+        <div id="kiq-selected-ingredients" class="kiq-selected-ingredients" style="margin-top:12px;"></div>
     </div>
 
     <!-- HISTORY TAB -->

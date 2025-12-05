@@ -24,6 +24,7 @@ class KIQ_REST {
                 'permission_callback' => array( __CLASS__, 'check_auth' ),
                 'args'                => array(
                     'household_size'        => array( 'type' => 'integer' ),
+                    'members'               => array( 'type' => 'array' ),
                     'dietary_restrictions' => array( 'type' => 'array' ),
                     'cooking_skill'        => array( 'type' => 'string' ),
                     'budget_level'         => array( 'type' => 'string' ),
@@ -180,6 +181,7 @@ class KIQ_REST {
         // POST: Update profile
         $params = $request->get_json_params();
 
+        // Sanitize basic profile fields
         $profile = array(
             'household_size'        => intval( $params['household_size'] ?? 2 ),
             'dietary_restrictions' => isset( $params['dietary_restrictions'] ) ? array_map( 'sanitize_text_field', $params['dietary_restrictions'] ) : array(),
@@ -189,6 +191,27 @@ class KIQ_REST {
             'dislikes'             => isset( $params['dislikes'] ) ? array_map( 'sanitize_text_field', $params['dislikes'] ) : array(),
             'appliances'           => isset( $params['appliances'] ) ? array_map( 'sanitize_text_field', $params['appliances'] ) : array(),
         );
+
+        // Members (optional) - accept array of member objects with fields: name, appetite, allergies, intolerances, dislikes, age
+        $members = array();
+        if ( isset( $params['members'] ) && is_array( $params['members'] ) ) {
+            foreach ( $params['members'] as $m ) {
+                if ( ! is_array( $m ) ) continue;
+                $member = array(
+                    'name'          => sanitize_text_field( $m['name'] ?? '' ),
+                    'appetite'      => intval( $m['appetite'] ?? 3 ),
+                    'age'           => isset( $m['age'] ) ? intval( $m['age'] ) : null,
+                    'allergies'     => isset( $m['allergies'] ) && is_array( $m['allergies'] ) ? array_map( 'sanitize_text_field', $m['allergies'] ) : array(),
+                    'intolerances'  => isset( $m['intolerances'] ) && is_array( $m['intolerances'] ) ? array_map( 'sanitize_text_field', $m['intolerances'] ) : array(),
+                    'dislikes'      => isset( $m['dislikes'] ) && is_array( $m['dislikes'] ) ? array_map( 'sanitize_text_field', $m['dislikes'] ) : array(),
+                );
+                $members[] = $member;
+            }
+        }
+
+        if ( ! empty( $members ) ) {
+            $profile['members'] = $members;
+        }
 
         KIQ_Data::save_profile( $user_id, $profile );
 
@@ -229,6 +252,7 @@ class KIQ_REST {
         $params   = $request->get_json_params();
         $plan_type = sanitize_text_field( $params['plan_type'] ?? 'balanced' );
         $mood     = isset( $params['mood'] ) ? sanitize_text_field( $params['mood'] ) : null;
+        $more_seed = isset( $params['more_seed'] ) ? sanitize_text_field( $params['more_seed'] ) : null;
 
         // Check feature access
         if ( ! KIQ_Features::allows( $user_id, 'meal_planning' ) ) {
@@ -253,7 +277,11 @@ class KIQ_REST {
         $debug = defined( 'WP_DEBUG' ) && WP_DEBUG;
 
         try {
-            $meal_plan = KIQ_AI::generate_meal_plan( $user_id, $profile, $inventory, $plan_type, $mood );
+            $opts = array();
+            if ( $more_seed ) {
+                $opts['more_seed'] = $more_seed;
+            }
+            $meal_plan = KIQ_AI::generate_meal_plan( $user_id, $profile, $inventory, $plan_type, $mood, $opts );
 
             if ( is_wp_error( $meal_plan ) ) {
                 error_log( "KIQ: generate_meal_plan WP_Error: " . $meal_plan->get_error_message() );
