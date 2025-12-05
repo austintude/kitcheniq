@@ -3,7 +3,7 @@
  * Plugin Name: KitchenIQ
  * Plugin URI: https://kitcheniq.ai
  * Description: AI-powered kitchen intelligence system. Scan your pantry, get personalized meal plans, and reduce food waste.
- * Version: 0.2.2
+ * Version: 0.2.3
  * Author: KitchenIQ
  * Author URI: https://kitcheniq.ai
  * License: GPL-2.0+
@@ -23,7 +23,7 @@ if ( ! defined( 'KIQ_PLUGIN_URL' ) ) {
     define( 'KIQ_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 }
 if ( ! defined( 'KIQ_VERSION' ) ) {
-    define( 'KIQ_VERSION', '0.2.2' );
+    define( 'KIQ_VERSION', '0.2.3' );
 }
 
 // API Key configuration - check environment first, then WordPress options
@@ -69,12 +69,24 @@ register_activation_hook( __FILE__, array( 'KIQ_Activator', 'activate' ) );
 register_deactivation_hook( __FILE__, array( 'KIQ_Activator', 'deactivate' ) );
 
 // Initialize hooks
+add_action( 'plugins_loaded', array( 'KIQ_Main', 'load_textdomain' ) );
 add_action( 'init', array( 'KIQ_Main', 'init' ) );
 
 /**
  * Main plugin class
  */
 class KIQ_Main {
+
+    /**
+     * Load plugin text domain for translations.
+     */
+    public static function load_textdomain() {
+        load_plugin_textdomain(
+            'kitchen-iq',
+            false,
+            dirname( plugin_basename( __FILE__ ) ) . '/languages'
+        );
+    }
 
     /**
      * Initialize the plugin
@@ -89,8 +101,10 @@ class KIQ_Main {
         // Enqueue scripts and styles
         add_action( 'wp_enqueue_scripts', array( __CLASS__, 'enqueue_dashboard_assets' ) );
 
-        // Initialize admin
-        KIQ_Admin::init();
+        // Initialize admin only within wp-admin
+        if ( is_admin() ) {
+            KIQ_Admin::init();
+        }
     }
 
     /**

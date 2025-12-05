@@ -694,5 +694,3 @@ class KIQ_Admin {
     }
 }
 
-// Initialize admin
-KIQ_Admin::init();
