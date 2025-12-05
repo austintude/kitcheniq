@@ -19,15 +19,25 @@ class KitchenIQDashboard {
         // Load user profile
         await this.loadProfile();
         
-        // If profile exists, show dashboard, else show onboarding
-        if (this.profile && Object.keys(this.profile).length > 0) {
+        // Decide initial view from URL ?view= or fallback to onboarding/dashboard
+        const params = new URLSearchParams(window.location.search);
+        const initialView = params.get('view');
+        if (initialView) {
+            this.showTab(initialView);
+        } else if (this.profile && Object.keys(this.profile).length > 0) {
             this.showTab('dashboard');
         } else {
             this.showTab('onboarding');
         }
 
+        // If onboarding form present, initialize stepper state
+        this.initOnboardingStepper();
+
         // Attach event listeners
         this.attachEventListeners();
+
+        // Attempt to register PWA artifacts (manifest + service worker)
+        this.registerPWA();
     }
 
     async loadProfile() {
@@ -67,10 +77,34 @@ class KitchenIQDashboard {
             });
         });
 
+        // Bottom nav (app-like) routing
+        document.querySelectorAll('.kiq-bottom-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                const route = btn.dataset.route;
+                this.showTab(route);
+                // update bottom nav active state
+                document.querySelectorAll('.kiq-bottom-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            });
+        });
+
+        // Handle back/forward navigation
+        window.addEventListener('popstate', (e) => {
+            const params = new URLSearchParams(window.location.search);
+            const view = params.get('view') || 'dashboard';
+            this.showTab(view);
+        });
+
         // Onboarding form
         const onboardingForm = document.getElementById('kiq-onboarding-form');
         if (onboardingForm) {
             onboardingForm.addEventListener('submit', (e) => this.handleOnboarding(e));
+            // autosave on input changes (debounced)
+            onboardingForm.querySelectorAll('input, select, textarea').forEach(el => {
+                el.addEventListener('input', () => this.scheduleAutosave());
+                el.addEventListener('change', () => this.scheduleAutosave());
+            });
         }
 
         // Meal generation
@@ -102,6 +136,149 @@ class KitchenIQDashboard {
         if (fileInput) {
             fileInput.addEventListener('change', (e) => this.handleImageUpload(e));
         }
+
+        // Menu toggle
+        const menuToggle = document.getElementById('kiq-menu-toggle');
+        if (menuToggle) {
+            menuToggle.addEventListener('click', () => {
+                const topNav = document.getElementById('kiq-top-nav');
+                if (topNav) topNav.classList.toggle('hidden');
+            });
+        }
+    }
+
+    /* Onboarding stepper */
+    initOnboardingStepper() {
+        this.onboardStep = 1;
+        const nextBtn = document.getElementById('kiq-step-next');
+        const prevBtn = document.getElementById('kiq-step-prev');
+        if (nextBtn) nextBtn.addEventListener('click', () => this.onboardNext());
+        if (prevBtn) prevBtn.addEventListener('click', () => this.onboardPrev());
+        this.showOnboardStep(this.onboardStep);
+    }
+
+    showOnboardStep(n) {
+        document.querySelectorAll('.onboard-step').forEach(el => el.classList.add('hidden'));
+        const stepEl = document.querySelector(`.onboard-step[data-step="${n}"]`);
+        if (stepEl) stepEl.classList.remove('hidden');
+        document.getElementById('kiq-step-prev').classList.toggle('hidden', n === 1);
+        document.getElementById('kiq-step-next').textContent = n >= document.querySelectorAll('.onboard-step').length ? 'Save' : 'Next →';
+    }
+
+    onboardNext() {
+        const total = document.querySelectorAll('.onboard-step').length;
+        if (this.onboardStep >= total) {
+            // final - submit form
+            const form = document.getElementById('kiq-onboarding-form');
+            this.handleOnboarding(new Event('submit', { cancelable: true, bubbles: true, target: form }));
+            return;
+        }
+        this.onboardStep += 1;
+        this.showOnboardStep(this.onboardStep);
+    }
+
+    onboardPrev() {
+        if (this.onboardStep <= 1) return;
+        this.onboardStep -= 1;
+        this.showOnboardStep(this.onboardStep);
+    }
+
+    /* Autosave for onboarding/profile (debounced) */
+    scheduleAutosave() {
+        clearTimeout(this.autosaveTimer);
+        this.autosaveTimer = setTimeout(() => this.autosaveProfile(), 900);
+    }
+
+    async autosaveProfile() {
+        const form = document.getElementById('kiq-onboarding-form');
+        if (!form) return;
+        const formData = new FormData(form);
+        // Build payload to exactly match REST handler expectations
+        const householdSizeRaw = formData.get('household_size');
+        const household_size = householdSizeRaw ? parseInt(householdSizeRaw, 10) : 2;
+
+        const dietary_restrictions = formData.getAll('dietary_restrictions') || [];
+        const appliances = formData.getAll('appliances') || [];
+
+        const cooking_skill = formData.get('cooking_skill') || 'intermediate';
+        const budget_level = formData.get('budget_level') || 'moderate';
+        const time_per_meal = formData.get('time_per_meal') || 'moderate';
+
+        const dislikesRaw = formData.get('dislikes') || '';
+        const dislikes = dislikesRaw.split(',').map(d => d.trim()).filter(Boolean);
+
+        const profile = {
+            household_size: household_size,
+            dietary_restrictions: dietary_restrictions,
+            cooking_skill: cooking_skill,
+            budget_level: budget_level,
+            time_per_meal: time_per_meal,
+            dislikes: dislikes,
+            appliances: appliances,
+        };
+
+        try {
+            const response = await fetch(`${this.apiRoot}kitcheniq/v1/profile`, {
+                method: 'POST',
+                headers: { 'X-WP-Nonce': this.nonce, 'Content-Type': 'application/json' },
+                body: JSON.stringify(profile),
+            });
+            if (response.ok) {
+                this.showSavedIndicator();
+            }
+        } catch (err) {
+            console.error('Autosave failed:', err);
+        }
+    }
+
+    showSavedIndicator() {
+        const el = document.getElementById('kiq-saved-indicator');
+        if (!el) return;
+        el.style.display = 'inline-block';
+        clearTimeout(this._savedTimeout);
+        this._savedTimeout = setTimeout(() => el.style.display = 'none', 1800);
+    }
+
+    /* PWA registration (manifest injection + service worker) */
+    registerPWA() {
+        try {
+            const pluginUrl = (window.kitcheniqData && window.kitcheniqData.pluginUrl) ? window.kitcheniqData.pluginUrl : (typeof kitcheniqData !== 'undefined' ? kitcheniqData.pluginUrl : '');
+            if (!pluginUrl) return;
+
+            // Inject manifest link if not present
+            if (!document.querySelector('link[rel="manifest"]')) {
+                const l = document.createElement('link');
+                l.rel = 'manifest';
+                l.href = pluginUrl + 'manifest.json';
+                document.head.appendChild(l);
+            }
+
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.register(pluginUrl + 'service-worker.js')
+                    .then(reg => console.log('KitchenIQ service worker registered', reg))
+                    .catch(err => console.warn('KitchenIQ SW registration failed', err));
+            }
+        } catch (err) {
+            console.warn('PWA registration error', err);
+        }
+    }
+
+    /* Skeleton helpers */
+    showSkeleton(containerId, count = 3, type = 'card') {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        const html = new Array(count).fill(0).map(() => `<div class="kiq-skeleton" style="height:120px;margin-bottom:12px;"></div>`).join('');
+        container.dataset.prevHtml = container.innerHTML;
+        container.innerHTML = html;
+    }
+
+    hideSkeleton(containerId) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        if (container.dataset.prevHtml !== undefined) {
+            container.innerHTML = container.dataset.prevHtml;
+            delete container.dataset.prevHtml;
+        }
     }
 
     showTab(tabName) {
@@ -128,6 +305,21 @@ class KitchenIQDashboard {
         }
 
         this.currentTab = tabName;
+
+        // reflect in URL (shallow routing)
+        try {
+            const params = new URLSearchParams(window.location.search);
+            params.set('view', tabName);
+            const newUrl = window.location.pathname + '?' + params.toString();
+            history.replaceState({}, '', newUrl);
+        } catch (err) {
+            // ignore
+        }
+
+        // update bottom nav active state if present
+        document.querySelectorAll('.kiq-bottom-btn').forEach(b => b.classList.remove('active'));
+        const bottomBtn = document.querySelector(`.kiq-bottom-btn[data-route="${tabName}"]`);
+        if (bottomBtn) bottomBtn.classList.add('active');
 
         // Load data if needed
         if (tabName === 'dashboard') {
@@ -183,6 +375,7 @@ class KitchenIQDashboard {
     }
 
     async handleImageUpload(e) {
+        this.showSkeleton('kiq-inventory-list', 4, 'inventory');
         const file = e.target.files[0];
         if (!file) return;
 
@@ -224,9 +417,11 @@ class KitchenIQDashboard {
                 
                 if (data.success) {
                     this.inventory = data.inventory;
+                    this.hideSkeleton('kiq-inventory-list');
                     this.renderInventory();
                     this.showNotification(`Added ${data.items_added} items from image`, 'success');
                 } else {
+                    this.hideSkeleton('kiq-inventory-list');
                     this.showNotification(data.error || 'Error processing image', 'error');
                 }
 
@@ -255,6 +450,7 @@ class KitchenIQDashboard {
         btn.disabled = true;
 
         try {
+            this.showSkeleton('kiq-meal-results', 3, 'meals');
             const response = await fetch(`${this.apiRoot}kitcheniq/v1/meals`, {
                 method: 'POST',
                 headers: {
@@ -278,9 +474,11 @@ class KitchenIQDashboard {
             
             if (data.success || data.meals) {
                 this.mealPlan = data.meal_plan || data;
+                this.hideSkeleton('kiq-meal-results');
                 this.renderMealPlan();
                 this.showNotification('Meals generated!', 'success');
             } else {
+                this.hideSkeleton('kiq-meal-results');
                 this.showNotification(data.error || 'Error generating meals', 'error');
             }
         } catch (error) {

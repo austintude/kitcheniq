@@ -2,6 +2,28 @@
  * KitchenIQ Dashboard Styles
  */
 
+/* Theme tokens / app shell */
+:root {
+    --kiq-bg: #f7f8fa;
+    --kiq-surface: #ffffff;
+    --kiq-accent: #2ecc71;
+    --kiq-accent-600: #27ae60;
+    --kiq-muted: #6b7280;
+    --kiq-radius: 12px;
+    --kiq-gap: 16px;
+    --kiq-shadow: 0 6px 18px rgba(12,14,20,0.06);
+    --kiq-font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+/* App shell */
+.kiq-app { background: var(--kiq-bg); min-height: 100vh; display: flex; flex-direction: column; }
+.kiq-header { background: var(--kiq-surface); box-shadow: 0 1px 0 rgba(0,0,0,0.04); }
+.kiq-header-inner { max-width: 1200px; margin: 0 auto; padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; }
+.kiq-brand { font-weight: 700; font-size: 18px; color: #111; font-family: var(--kiq-font-sans); }
+.kiq-header-actions { display:flex; gap:10px; align-items:center; }
+
+.kiq-dashboard { max-width: 1200px; margin: 18px auto; padding: 20px; font-family: var(--kiq-font-sans); flex: 1 1 auto; }
+
 /* Main container */
 .kiq-dashboard {
     max-width: 1200px;
@@ -144,6 +166,23 @@
     min-height: 80px;
 }
 
+/* Onboarding stepper */
+.onboard-step { transition: opacity 0.25s ease; }
+.kiq-form-step-controls { display:flex; align-items:center; }
+.kiq-saved { color: var(--kiq-accent); font-weight:600; }
+
+/* Skeleton helpers */
+.kiq-skeleton { background: linear-gradient(90deg, #f0f0f0 25%, #e8e8e8 37%, #f0f0f0 63%); background-size: 400% 100%; animation: shimmer 1.2s linear infinite; border-radius: 8px; }
+@keyframes shimmer { 0%{background-position:200% 0}100%{background-position:-200% 0} }
+
+/* Saved indicator */
+#kiq-saved-indicator { color: var(--kiq-accent-600); font-weight:700; }
+
+/* Menu button */
+.menu-btn { background: transparent; border: none; font-size: 18px; padding: 6px 8px; cursor: pointer; }
+.kiq-top-nav { display:block; border-top:1px solid #f0f0f0; }
+
+
 .kiq-checkbox-group {
     display: grid;
     gap: 12px;
@@ -180,11 +219,11 @@
 }
 
 .kiq-inventory-item {
-    background: white;
-    border: 1px solid #e0e0e0;
-    border-radius: 8px;
+    background: var(--kiq-surface);
+    border: 1px solid #e8e8e8;
+    border-radius: var(--kiq-radius);
     padding: 16px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    box-shadow: var(--kiq-shadow);
     transition: all 0.3s ease;
 }
 
@@ -269,11 +308,11 @@
 }
 
 .kiq-meal-card {
-    background: white;
-    border: 1px solid #e0e0e0;
-    border-radius: 8px;
+    background: var(--kiq-surface);
+    border: 1px solid #e8e8e8;
+    border-radius: var(--kiq-radius);
     padding: 20px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    box-shadow: var(--kiq-shadow);
     transition: all 0.3s ease;
 }
 
@@ -395,7 +434,7 @@
 }
 
 .btn-primary {
-    background-color: #2ecc71;
+    background-color: var(--kiq-accent);
     color: white;
 }
 
@@ -447,6 +486,31 @@
     .kiq-notification {
         max-width: 100%;
     }
+}
+
+/* Bottom navigation for mobile app feel */
+.kiq-bottom-nav {
+    position: sticky;
+    bottom: 0;
+    width: 100%;
+    background: var(--kiq-surface);
+    border-top: 1px solid #e8e8e8;
+    display: flex;
+    justify-content: space-around;
+    padding: 8px 0;
+}
+.kiq-bottom-btn {
+    background: transparent;
+    border: none;
+    font-size: 14px;
+    padding: 6px 8px;
+    color: var(--kiq-muted);
+}
+.kiq-bottom-btn.active { color: var(--kiq-accent); font-weight: 700; }
+
+/* Hide top tab nav on small screens to create a cleaner app feel */
+@media (max-width: 640px) {
+    .kiq-nav-tabs { display: none; }
 }
 
 /* Utility classes */
