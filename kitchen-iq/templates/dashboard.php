@@ -130,10 +130,14 @@
     <!-- INVENTORY TAB -->
     <div data-content="inventory">
         <h2>📦 Your Pantry</h2>
+        <p style="color: #666; margin-bottom: 20px;">Optionally scan your pantry with your camera to help us suggest meals. Or skip this and generate meals anyway!</p>
 
         <div class="kiq-inventory-controls">
             <button id="kiq-camera-btn" class="btn btn-primary kiq-camera-btn">
                 📸 Scan with Camera
+            </button>
+            <button id="kiq-skip-scan-btn" class="btn btn-secondary" style="margin-left: 10px;">
+                ➡️ Skip & Go to Meals
             </button>
             <input type="file" id="kiq-camera-input" accept="image/*" capture="environment" style="display: none;" />
         </div>
@@ -146,6 +150,7 @@
     <!-- DASHBOARD/MEALS TAB -->
     <div data-content="dashboard">
         <h2>🍽️ Generate Your Meals</h2>
+        <p style="color: #666; margin-bottom: 20px;">Create personalized meal suggestions based on your preferences. You can optionally update your pantry first, or generate meals with what you already have.</p>
 
         <div class="kiq-meals-generator">
             <div class="kiq-generator-controls">
@@ -166,6 +171,9 @@
 
                 <button id="kiq-generate-meals-btn" class="btn btn-primary">
                     ✨ Generate Meals
+                </button>
+                <button id="kiq-update-pantry-btn" class="btn btn-secondary" style="margin-left: 10px;">
+                    📸 Update Pantry First
                 </button>
             </div>
         </div>

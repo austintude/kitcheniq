@@ -55,6 +55,18 @@ class KIQ_Airtable {
         // Log errors but don't break user flow
         if ( is_wp_error( $response ) ) {
             error_log( 'KitchenIQ Airtable error: ' . $response->get_error_message() );
+            return;
+        }
+
+        $http_code = wp_remote_retrieve_response_code( $response );
+        $body_raw  = wp_remote_retrieve_body( $response );
+
+        if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+            error_log( sprintf( 'KIQ: Airtable send_meal_history response - http_code=%s body_preview=%s', $http_code, substr( $body_raw, 0, 600 ) ) );
+        }
+
+        if ( $http_code < 200 || $http_code >= 300 ) {
+            error_log( sprintf( 'KitchenIQ Airtable unexpected status %s: %s', $http_code, substr( $body_raw, 0, 800 ) ) );
         }
     }
 
