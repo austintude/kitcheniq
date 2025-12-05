@@ -305,8 +305,8 @@ class KIQ_REST {
             $record_id = KIQ_Data::save_meal_history(
                 $user_id,
                 $plan_type,
-                wp_json_encode( $meals ),
-                wp_json_encode( $shopping_list )
+                $meals,
+                $shopping_list
             );
 
             if ( is_wp_error( $record_id ) ) {

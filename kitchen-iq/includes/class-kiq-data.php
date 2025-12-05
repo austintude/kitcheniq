@@ -46,14 +46,24 @@ class KIQ_Data {
         global $wpdb;
         $table_name = $wpdb->prefix . 'kiq_meal_history';
 
+        $meals_json = wp_json_encode( $meals );
+        if ( false === $meals_json ) {
+            return new WP_Error( 'kiq_meal_history_encode_failed', 'Failed to encode meals for storage.' );
+        }
+
+        $shopping_list_json = wp_json_encode( $shopping_list );
+        if ( false === $shopping_list_json ) {
+            return new WP_Error( 'kiq_shopping_list_encode_failed', 'Failed to encode shopping list for storage.' );
+        }
+
         $wpdb->insert(
             $table_name,
             array(
                 'user_id'             => $user_id,
                 'created_at'          => current_time( 'mysql' ),
                 'plan_type'           => $plan_type,
-                'meals_json'          => wp_json_encode( $meals ),
-                'shopping_list_json'  => wp_json_encode( $shopping_list ),
+                'meals_json'          => $meals_json,
+                'shopping_list_json'  => $shopping_list_json,
             ),
             array(
                 '%d',
@@ -68,7 +78,7 @@ class KIQ_Data {
 
         if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
             if ( $insert_id ) {
-                error_log( sprintf( 'KIQ: save_meal_history success - user_id=%d record_id=%s plan_type=%s meals_len=%d', intval( $user_id ), $insert_id, esc_html( $plan_type ), strlen( $meals ) ) );
+                error_log( sprintf( 'KIQ: save_meal_history success - user_id=%d record_id=%s plan_type=%s meals_len=%d', intval( $user_id ), $insert_id, esc_html( $plan_type ), strlen( $meals_json ) ) );
             } else {
                 error_log( sprintf( 'KIQ: save_meal_history FAILED - user_id=%d plan_type=%s wp_error=%s', intval( $user_id ), esc_html( $plan_type ), $wpdb->last_error ) );
             }
