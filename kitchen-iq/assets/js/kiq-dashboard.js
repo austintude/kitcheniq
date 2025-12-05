@@ -85,6 +85,18 @@ class KitchenIQDashboard {
             cameraBtn.addEventListener('click', () => this.triggerCameraUpload());
         }
 
+        // Skip scan button (jump to meals tab)
+        const skipScanBtn = document.getElementById('kiq-skip-scan-btn');
+        if (skipScanBtn) {
+            skipScanBtn.addEventListener('click', () => this.showTab('dashboard'));
+        }
+
+        // Update pantry button (jump to inventory tab)
+        const updatePantryBtn = document.getElementById('kiq-update-pantry-btn');
+        if (updatePantryBtn) {
+            updatePantryBtn.addEventListener('click', () => this.showTab('inventory'));
+        }
+
         // File input for camera
         const fileInput = document.getElementById('kiq-camera-input');
         if (fileInput) {
@@ -242,8 +254,8 @@ class KitchenIQDashboard {
             });
 
             const data = await response.json();
-            if (data.success) {
-                this.mealPlan = data.meal_plan;
+            if (data.success || data.meals) {
+                this.mealPlan = data.meal_plan || data;
                 this.renderMealPlan();
                 this.showNotification('Meals generated!', 'success');
             } else {

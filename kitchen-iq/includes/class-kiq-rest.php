@@ -324,9 +324,37 @@ class KIQ_REST {
      * Handle vision scanning
      */
     public static function handle_inventory_scan( $request ) {
-        $user_id   = get_current_user_id();
-        $params    = $request->get_json_params();
-        $image_url = esc_url( $params['image_url'] );
+        $user_id = get_current_user_id();
+
+        $params = $request->get_json_params();
+
+        // Accept either a remote URL or a data URI (base64 image) from the client.
+        $raw_image = isset( $params['image_url'] ) ? $params['image_url'] : '';
+
+        if ( empty( $raw_image ) ) {
+            return new WP_REST_Response( array(
+                'error' => 'Missing image_url parameter',
+            ), 400 );
+        }
+
+        // If it's a data URI (client sent base64 image), keep it but validate the prefix.
+        if ( strpos( $raw_image, 'data:' ) === 0 ) {
+            if ( preg_match( '#^data:image/(png|jpeg|jpg);base64,#i', $raw_image ) ) {
+                $image_url = $raw_image;
+            } else {
+                return new WP_REST_Response( array(
+                    'error' => 'Unsupported data URI image format',
+                ), 400 );
+            }
+        } else {
+            // Otherwise treat it as a remote URL and sanitize.
+            $image_url = esc_url_raw( $raw_image );
+            if ( empty( $image_url ) ) {
+                return new WP_REST_Response( array(
+                    'error' => 'Invalid image URL',
+                ), 400 );
+            }
+        }
 
         if ( ! KIQ_Features::allows( $user_id, 'vision_scanning' ) ) {
             return new WP_REST_Response( array(
