@@ -1,0 +1,471 @@
+/**
+ * KitchenIQ Dashboard Styles
+ */
+
+/* Main container */
+.kiq-dashboard {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+}
+
+/* Tab navigation */
+.kiq-nav-tabs {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 30px;
+    border-bottom: 2px solid #e0e0e0;
+    flex-wrap: wrap;
+}
+
+.kiq-nav-tabs [data-tab] {
+    padding: 12px 20px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+    color: #666;
+    border-bottom: 3px solid transparent;
+    transition: all 0.3s ease;
+}
+
+.kiq-nav-tabs [data-tab]:hover {
+    color: #333;
+}
+
+.kiq-nav-tabs [data-tab].active {
+    color: #2ecc71;
+    border-bottom-color: #2ecc71;
+    font-weight: 600;
+}
+
+/* Tab content */
+[data-content] {
+    display: none;
+    animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Notifications */
+.kiq-notifications {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 1000;
+}
+
+.kiq-notification {
+    padding: 16px 20px;
+    margin-bottom: 10px;
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    animation: slideIn 0.3s ease;
+    max-width: 400px;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(400px);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+.kiq-notification.kiq-success {
+    background-color: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.kiq-notification.kiq-error {
+    background-color: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+}
+
+.kiq-notification.kiq-info {
+    background-color: #d1ecf1;
+    color: #0c5460;
+    border: 1px solid #bee5eb;
+}
+
+/* Onboarding */
+.kiq-onboarding-form {
+    max-width: 600px;
+    margin: 0 auto;
+}
+
+.kiq-form-group {
+    margin-bottom: 24px;
+}
+
+.kiq-form-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: #333;
+}
+
+.kiq-form-group input,
+.kiq-form-group select,
+.kiq-form-group textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 16px;
+    transition: border-color 0.3s ease;
+}
+
+.kiq-form-group input:focus,
+.kiq-form-group select:focus,
+.kiq-form-group textarea:focus {
+    outline: none;
+    border-color: #2ecc71;
+    box-shadow: 0 0 0 3px rgba(46, 204, 113, 0.1);
+}
+
+.kiq-form-group textarea {
+    resize: vertical;
+    min-height: 80px;
+}
+
+.kiq-checkbox-group {
+    display: grid;
+    gap: 12px;
+}
+
+.kiq-checkbox-item {
+    display: flex;
+    align-items: center;
+}
+
+.kiq-checkbox-item input {
+    width: auto;
+    margin-right: 10px;
+}
+
+/* Inventory */
+.kiq-inventory-controls {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+}
+
+.kiq-camera-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.kiq-inventory-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+}
+
+.kiq-inventory-item {
+    background: white;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 16px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    transition: all 0.3s ease;
+}
+
+.kiq-inventory-item:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    transform: translateY(-2px);
+}
+
+.kiq-item-name {
+    font-size: 18px;
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 8px;
+}
+
+.kiq-item-details {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.kiq-category,
+.kiq-status {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.kiq-category {
+    background-color: #e8f4f8;
+    color: #0c5460;
+}
+
+.kiq-status {
+    background-color: #e8f5e9;
+    color: #1b5e20;
+}
+
+.kiq-status.nearing {
+    background-color: #fff3e0;
+    color: #e65100;
+}
+
+.kiq-status.expired {
+    background-color: #ffebee;
+    color: #b71c1c;
+}
+
+.kiq-expiry {
+    font-size: 13px;
+    color: #666;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #e0e0e0;
+}
+
+/* Meals */
+.kiq-meals-generator {
+    margin-bottom: 24px;
+}
+
+.kiq-generator-controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr auto;
+    gap: 12px;
+    margin-bottom: 16px;
+    align-items: flex-end;
+}
+
+@media (max-width: 768px) {
+    .kiq-generator-controls {
+        grid-template-columns: 1fr;
+    }
+}
+
+.kiq-meal-results {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+    gap: 20px;
+}
+
+.kiq-meal-card {
+    background: white;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    transition: all 0.3s ease;
+}
+
+.kiq-meal-card:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    transform: translateY(-4px);
+}
+
+.kiq-meal-card h3 {
+    margin: 0 0 12px 0;
+    color: #333;
+    font-size: 20px;
+}
+
+.kiq-meal-meta {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+
+.kiq-meal-type,
+.kiq-cooking-time,
+.kiq-difficulty {
+    padding: 4px 10px;
+    border-radius: 4px;
+    background-color: #f0f0f0;
+    font-size: 13px;
+    font-weight: 500;
+    color: #666;
+}
+
+.kiq-ingredients,
+.kiq-missing,
+.kiq-instructions {
+    margin-bottom: 16px;
+}
+
+.kiq-ingredients h4,
+.kiq-missing h4 {
+    margin: 12px 0 8px 0;
+    font-size: 14px;
+    color: #333;
+}
+
+.kiq-ingredients ul,
+.kiq-missing ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.kiq-ingredients li,
+.kiq-missing li {
+    padding: 6px 0;
+    color: #666;
+    font-size: 14px;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.kiq-instructions {
+    background-color: #fafafa;
+    padding: 12px;
+    border-radius: 4px;
+    border-left: 3px solid #2ecc71;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.kiq-instructions p {
+    margin: 0;
+    color: #555;
+}
+
+.kiq-meal-actions {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid #e0e0e0;
+}
+
+.kiq-shopping-list {
+    background-color: #e8f5e9;
+    border: 1px solid #c8e6c9;
+    border-radius: 8px;
+    padding: 20px;
+    margin-top: 20px;
+}
+
+.kiq-shopping-list h3 {
+    margin: 0 0 12px 0;
+    color: #1b5e20;
+}
+
+.kiq-shopping-list ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.kiq-shopping-list li {
+    padding: 8px 0;
+    color: #2e7d32;
+    border-bottom: 1px solid rgba(46, 125, 50, 0.1);
+}
+
+.kiq-shopping-list li:last-child {
+    border-bottom: none;
+}
+
+/* Buttons */
+.btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.btn-primary {
+    background-color: #2ecc71;
+    color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+    background-color: #27ae60;
+    box-shadow: 0 2px 8px rgba(46, 204, 113, 0.3);
+}
+
+.btn-secondary {
+    background-color: #95a5a6;
+    color: white;
+}
+
+.btn-secondary:hover:not(:disabled) {
+    background-color: #7f8c8d;
+}
+
+.btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .kiq-dashboard {
+        padding: 12px;
+    }
+
+    .kiq-nav-tabs {
+        gap: 8px;
+        margin-bottom: 20px;
+    }
+
+    .kiq-nav-tabs [data-tab] {
+        padding: 10px 14px;
+        font-size: 14px;
+    }
+
+    .kiq-inventory-list,
+    .kiq-meal-results {
+        grid-template-columns: 1fr;
+    }
+
+    .kiq-notifications {
+        left: 10px;
+        right: 10px;
+    }
+
+    .kiq-notification {
+        max-width: 100%;
+    }
+}
+
+/* Utility classes */
+.text-center {
+    text-align: center;
+}
+
+.text-muted {
+    color: #999;
+}
+
+.mt-20 {
+    margin-top: 20px;
+}
+
+.mb-20 {
+    margin-bottom: 20px;
+}
+
+.hidden {
+    display: none !important;
+}
