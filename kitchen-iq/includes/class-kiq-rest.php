@@ -126,6 +126,24 @@ class KIQ_REST {
                 'permission_callback' => array( __CLASS__, 'check_auth' ),
             )
         );
+
+        // Diagnostic endpoint (admin only)
+        register_rest_route(
+            'kitcheniq/v1',
+            '/diagnostic',
+            array(
+                'methods'             => 'GET',
+                'callback'            => array( __CLASS__, 'handle_diagnostic' ),
+                'permission_callback' => array( __CLASS__, 'check_admin' ),
+            )
+        );
+    }
+
+    /**
+     * Check if request is from an admin user
+     */
+    public static function check_admin( $request ) {
+        return current_user_can( 'manage_options' );
     }
 
     /**
@@ -412,6 +430,34 @@ class KIQ_REST {
         return new WP_REST_Response( array(
             'usage' => $usage,
         ), 200 );
+    }
+
+    /**
+     * Diagnostic endpoint - test API connectivity and configuration
+     */
+    public static function handle_diagnostic( $request ) {
+        $diagnostics = array(
+            'wordpress' => array(
+                'version'          => get_bloginfo( 'version' ),
+                'php_version'      => phpversion(),
+                'wp_debug'         => defined( 'WP_DEBUG' ) ? WP_DEBUG : false,
+                'debug_log'        => defined( 'WP_DEBUG_LOG' ) ? WP_DEBUG_LOG : false,
+            ),
+            'plugin' => array(
+                'version'          => get_option( 'kitcheniq_version', 'unknown' ),
+                'api_key_source'   => getenv( 'KIQ_API_KEY' ) ? 'environment' : ( get_option( 'kiq_api_key_setting' ) ? 'wordpress_option' : 'not_set' ),
+            ),
+            'ai_settings' => array(
+                'text_model'       => get_option( 'kiq_ai_text_model', 'gpt-4o-mini' ),
+                'vision_model'     => get_option( 'kiq_ai_vision_model', 'gpt-4o-mini' ),
+                'temperature'      => get_option( 'kiq_ai_temperature', 0.3 ),
+                'max_tokens'       => get_option( 'kiq_ai_max_tokens', 1500 ),
+                'logging_enabled'  => get_option( 'kiq_enable_ai_logging', false ),
+            ),
+            'openai_test' => KIQ_AI::test_openai_connection(),
+        );
+
+        return new WP_REST_Response( $diagnostics, 200 );
     }
 }
 

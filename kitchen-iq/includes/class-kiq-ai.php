@@ -151,7 +151,7 @@ class KIQ_AI {
     }
 
     /**
-     * Call OpenAI API with retry logic
+     * Call OpenAI API with retry logic and enhanced diagnostics
      */
     private static function call_openai( $payload, $retry_count = 0 ) {
         $args = array(
@@ -163,29 +163,133 @@ class KIQ_AI {
             'timeout' => 30,
         );
 
+        // Log diagnostics if debug enabled
+        if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+            error_log( 'KitchenIQ: Sending request to OpenAI with model: ' . ( $payload['model'] ?? 'unknown' ) );
+            error_log( 'KitchenIQ: Request payload size: ' . strlen( wp_json_encode( $payload ) ) . ' bytes' );
+        }
+
         $response = wp_remote_post( self::API_ENDPOINT, $args );
 
         if ( is_wp_error( $response ) ) {
-            error_log( 'KitchenIQ OpenAI error: ' . $response->get_error_message() );
+            $err_msg = $response->get_error_message();
+            error_log( 'KitchenIQ OpenAI connection error: ' . $err_msg );
             return $response;
         }
 
-        $body = json_decode( wp_remote_retrieve_body( $response ), true );
+        $http_code = wp_remote_retrieve_response_code( $response );
+        $body_raw = wp_remote_retrieve_body( $response );
+        $body = json_decode( $body_raw, true );
+
+        // Log HTTP status and response for diagnostics
+        if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+            error_log( 'KitchenIQ: OpenAI HTTP status: ' . $http_code );
+            error_log( 'KitchenIQ: OpenAI response body: ' . substr( $body_raw, 0, 500 ) );
+        }
 
         // Check for API errors
         if ( isset( $body['error'] ) ) {
             $error_msg = $body['error']['message'] ?? 'Unknown OpenAI error';
-            error_log( 'KitchenIQ OpenAI API error: ' . $error_msg );
-            return new WP_Error( 'openai_error', $error_msg );
+            $error_code = $body['error']['code'] ?? 'unknown';
+            error_log( 'KitchenIQ OpenAI API error (' . $error_code . '): ' . $error_msg );
+            return new WP_Error( 'openai_error', $error_msg . ' (Code: ' . $error_code . ')' );
+        }
+
+        if ( $http_code !== 200 ) {
+            error_log( 'KitchenIQ: Unexpected HTTP status ' . $http_code . ' from OpenAI. Response: ' . substr( $body_raw, 0, 200 ) );
+            return new WP_Error( 'http_error', 'OpenAI returned HTTP ' . $http_code );
         }
 
         if ( ! isset( $body['choices'][0]['message']['content'] ) ) {
+            error_log( 'KitchenIQ: Invalid response format from OpenAI. Keys: ' . implode( ', ', array_keys( $body ) ) );
             return new WP_Error( 'invalid_response', 'Unexpected OpenAI response format' );
         }
 
         return array(
             'content' => $body['choices'][0]['message']['content'],
             'usage'   => $body['usage'] ?? array(),
+        );
+    }
+
+    /**
+     * Test OpenAI connectivity and configuration
+     * Used by the diagnostic endpoint
+     */
+    public static function test_openai_connection() {
+        if ( ! KIQ_API_KEY || empty( KIQ_API_KEY ) ) {
+            return array(
+                'status' => 'error',
+                'message' => 'API key not configured',
+                'api_key_source' => getenv( 'KIQ_API_KEY' ) ? 'environment' : ( get_option( 'kiq_api_key_setting' ) ? 'wordpress' : 'none' ),
+            );
+        }
+
+        // Validate key format
+        if ( ! preg_match( '/^sk-[a-zA-Z0-9]{20,}/', KIQ_API_KEY ) ) {
+            return array(
+                'status' => 'error',
+                'message' => 'API key format invalid (should start with sk-)',
+                'api_key_preview' => substr( KIQ_API_KEY, 0, 10 ) . '...',
+            );
+        }
+
+        // Test with a minimal completion request
+        $test_payload = array(
+            'model'      => 'gpt-4o-mini',
+            'messages'   => array(
+                array(
+                    'role'    => 'user',
+                    'content' => 'Say "OK" if you receive this.',
+                ),
+            ),
+            'max_tokens' => 10,
+        );
+
+        $args = array(
+            'headers' => array(
+                'Authorization' => 'Bearer ' . KIQ_API_KEY,
+                'Content-Type'  => 'application/json',
+            ),
+            'body'    => wp_json_encode( $test_payload ),
+            'timeout' => 15,
+        );
+
+        $response = wp_remote_post( self::API_ENDPOINT, $args );
+
+        if ( is_wp_error( $response ) ) {
+            return array(
+                'status'  => 'error',
+                'message' => 'Connection failed: ' . $response->get_error_message(),
+            );
+        }
+
+        $http_code = wp_remote_retrieve_response_code( $response );
+        $body = json_decode( wp_remote_retrieve_body( $response ), true );
+
+        if ( $http_code === 200 && isset( $body['choices'][0]['message']['content'] ) ) {
+            return array(
+                'status'    => 'success',
+                'message'   => 'Successfully connected to OpenAI',
+                'model'     => 'gpt-4o-mini',
+                'response'  => $body['choices'][0]['message']['content'],
+                'api_key_preview' => substr( KIQ_API_KEY, 0, 10 ) . '...',
+            );
+        }
+
+        if ( isset( $body['error'] ) ) {
+            return array(
+                'status'  => 'error',
+                'message' => 'OpenAI API error: ' . ( $body['error']['message'] ?? 'unknown' ),
+                'code'    => $body['error']['code'] ?? 'unknown',
+                'http_code' => $http_code,
+            );
+        }
+
+        return array(
+            'status'     => 'error',
+            'message'    => 'Unexpected response format',
+            'http_code'  => $http_code,
+            'response'   => $body,
         );
     }
 
