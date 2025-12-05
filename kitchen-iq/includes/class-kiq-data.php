@@ -64,7 +64,17 @@ class KIQ_Data {
             )
         );
 
-        return $wpdb->insert_id;
+        $insert_id = $wpdb->insert_id;
+
+        if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+            if ( $insert_id ) {
+                error_log( sprintf( 'KIQ: save_meal_history success - user_id=%d record_id=%s plan_type=%s meals_len=%d', intval( $user_id ), $insert_id, esc_html( $plan_type ), strlen( $meals ) ) );
+            } else {
+                error_log( sprintf( 'KIQ: save_meal_history FAILED - user_id=%d plan_type=%s wp_error=%s', intval( $user_id ), esc_html( $plan_type ), $wpdb->last_error ) );
+            }
+        }
+
+        return $insert_id;
     }
 
     /**
@@ -312,6 +322,10 @@ class KIQ_Data {
         $inventory = self::get_inventory( $user_id );
 
         if ( empty( $inventory ) || empty( $meals ) ) {
+            if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+                error_log( sprintf( 'KIQ: apply_meal_to_inventory no-op - user_id=%d inventory_count=%d meals_count=%d', intval( $user_id ), is_array( $inventory ) ? count( $inventory ) : 0, is_array( $meals ) ? count( $meals ) : 0 ) );
+            }
+
             return;
         }
 
@@ -362,5 +376,9 @@ class KIQ_Data {
         }
 
         self::save_inventory( $user_id, $inventory );
+
+        if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+            error_log( sprintf( 'KIQ: apply_meal_to_inventory complete - user_id=%d inventory_count=%d', intval( $user_id ), count( $inventory ) ) );
+        }
     }
 }

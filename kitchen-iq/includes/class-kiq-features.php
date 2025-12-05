@@ -41,7 +41,14 @@ class KIQ_Features {
         $limits    = self::get_tier_limits( $user_plan );
         $used      = KIQ_Data::get_week_usage( $user_id );
 
-        return $used['meals'] < $limits['meals_per_week'];
+        $used_meals = 0;
+        if ( is_array( $used ) ) {
+            $used_meals = intval( $used['meals'] ?? $used['meals_requested_count'] ?? 0 );
+        } elseif ( is_object( $used ) ) {
+            $used_meals = intval( $used->meals_requested_count ?? $used->meals ?? 0 );
+        }
+
+        return $used_meals < intval( $limits['meals_per_week'] ?? 0 );
     }
 
     /**
@@ -52,7 +59,14 @@ class KIQ_Features {
         $limits    = self::get_tier_limits( $user_plan );
         $used      = KIQ_Data::get_week_usage( $user_id );
 
-        return $used['vision_scans'] < $limits['vision_scans_per_week'];
+        $used_scans = 0;
+        if ( is_array( $used ) ) {
+            $used_scans = intval( $used['vision_scans'] ?? $used['vision_scans_count'] ?? $used['vision_scans_count'] ?? 0 );
+        } elseif ( is_object( $used ) ) {
+            $used_scans = intval( $used->vision_scans_count ?? $used->vision_scans ?? 0 );
+        }
+
+        return $used_scans < intval( $limits['vision_scans_per_week'] ?? 0 );
     }
 
     /**
@@ -92,9 +106,19 @@ class KIQ_Features {
         $limits    = self::get_tier_limits( $user_plan );
         $used      = KIQ_Data::get_week_usage( $user_id );
 
+        $used_meals = 0;
+        $used_scans = 0;
+        if ( is_array( $used ) ) {
+            $used_meals = intval( $used['meals'] ?? $used['meals_requested_count'] ?? 0 );
+            $used_scans = intval( $used['vision_scans'] ?? $used['vision_scans_count'] ?? 0 );
+        } elseif ( is_object( $used ) ) {
+            $used_meals = intval( $used->meals_requested_count ?? $used->meals ?? 0 );
+            $used_scans = intval( $used->vision_scans_count ?? $used->vision_scans ?? 0 );
+        }
+
         return array(
-            'meals_remaining'        => max( 0, $limits['meals_per_week'] - $used['meals'] ),
-            'vision_scans_remaining' => max( 0, $limits['vision_scans_per_week'] - $used['vision_scans'] ),
+            'meals_remaining'        => max( 0, intval( $limits['meals_per_week'] ?? 0 ) - $used_meals ),
+            'vision_scans_remaining' => max( 0, intval( $limits['vision_scans_per_week'] ?? 0 ) - $used_scans ),
             'plan'                   => $user_plan,
         );
     }

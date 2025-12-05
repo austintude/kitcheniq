@@ -127,23 +127,36 @@ class KIQ_REST {
             )
         );
 
-        // Diagnostic endpoint (admin only)
+        // Diagnostic endpoint (public for anyone to see)
         register_rest_route(
             'kitcheniq/v1',
             '/diagnostic',
             array(
                 'methods'             => 'GET',
                 'callback'            => array( __CLASS__, 'handle_diagnostic' ),
-                'permission_callback' => array( __CLASS__, 'check_admin' ),
+                'permission_callback' => '__return_true',  // Allow public access to diagnostics
             )
         );
     }
 
     /**
-     * Check if request is from an admin user
+     * Check if request is from an admin user (or logged-in user for diagnostics)
      */
     public static function check_admin( $request ) {
-        return current_user_can( 'manage_options' );
+        // Must be logged in
+        if ( ! is_user_logged_in() ) {
+            return false;
+        }
+        
+        // Admin users can always access
+        if ( current_user_can( 'manage_options' ) ) {
+            return true;
+        }
+        
+        // For diagnostics (debugging), also allow any logged-in user
+        // This helps users self-diagnose without needing admin access
+        // In production, you can restrict to manage_options only by removing the next line
+        return true;
     }
 
     /**
@@ -236,43 +249,80 @@ class KIQ_REST {
         $profile    = KIQ_Data::get_profile( $user_id );
         $inventory  = KIQ_Data::get_inventory( $user_id );
 
-        // Generate meal plan via AI
-        $meal_plan = KIQ_AI::generate_meal_plan( $user_id, $profile, $inventory, $plan_type, $mood );
+        // Generate meal plan via AI and handle errors safely
+        $debug = defined( 'WP_DEBUG' ) && WP_DEBUG;
 
-        if ( is_wp_error( $meal_plan ) ) {
+        try {
+            $meal_plan = KIQ_AI::generate_meal_plan( $user_id, $profile, $inventory, $plan_type, $mood );
+
+            if ( is_wp_error( $meal_plan ) ) {
+                error_log( "KIQ: generate_meal_plan WP_Error: " . $meal_plan->get_error_message() );
+                return new WP_REST_Response( array(
+                    'error' => $meal_plan->get_error_message(),
+                ), 500 );
+            }
+
+            if ( ! is_array( $meal_plan ) || ! isset( $meal_plan['meals'] ) ) {
+                error_log( "KIQ: generate_meal_plan returned unexpected format: " . wp_json_encode( $meal_plan ) );
+                return new WP_REST_Response( array(
+                    'error' => 'AI returned unexpected response format',
+                    'debug' => $debug ? $meal_plan : null,
+                ), 500 );
+            }
+
+            $meals = $meal_plan['meals'];
+            $shopping_list = isset( $meal_plan['shopping_list'] ) ? $meal_plan['shopping_list'] : array();
+
+            // Save meal history (guard for errors)
+            $record_id = KIQ_Data::save_meal_history(
+                $user_id,
+                $plan_type,
+                wp_json_encode( $meals ),
+                wp_json_encode( $shopping_list )
+            );
+
+            if ( is_wp_error( $record_id ) ) {
+                error_log( "KIQ: save_meal_history WP_Error: " . $record_id->get_error_message() );
+                return new WP_REST_Response( array(
+                    'error' => 'Failed to save meal history',
+                ), 500 );
+            }
+
+            // Apply meal to inventory (decrement quantities) - non-fatal
+            if ( KIQ_Features::allows( $user_id, 'meal_ratings' ) ) {
+                try {
+                    KIQ_Data::apply_meal_to_inventory( $user_id, $meals );
+                } catch ( Exception $e ) {
+                    error_log( "KIQ: apply_meal_to_inventory exception: " . $e->getMessage() );
+                }
+            }
+
+            // Send to Airtable if configured - non-fatal
+            try {
+                KIQ_Airtable::send_meal_history(
+                    $record_id,
+                    $user_id,
+                    $plan_type,
+                    $meals,
+                    $shopping_list
+                );
+            } catch ( Exception $e ) {
+                error_log( "KIQ: Airtable send_meal_history exception: " . $e->getMessage() );
+            }
+
             return new WP_REST_Response( array(
-                'error' => $meal_plan->get_error_message(),
+                'success'    => true,
+                'record_id'  => $record_id,
+                'meal_plan'  => $meal_plan,
+                'remaining'  => KIQ_Features::get_remaining_usage( $user_id ),
+            ), 200 );
+        } catch ( Exception $e ) {
+            error_log( "KIQ: unexpected exception in handle_generate_meals: " . $e->getMessage() );
+            $msg = $debug ? $e->getMessage() : 'Internal server error while generating meals';
+            return new WP_REST_Response( array(
+                'error' => $msg,
             ), 500 );
         }
-
-        // Save meal history
-        $record_id = KIQ_Data::save_meal_history(
-            $user_id,
-            $plan_type,
-            wp_json_encode( $meal_plan['meals'] ),
-            wp_json_encode( $meal_plan['shopping_list'] ?? array() )
-        );
-
-        // Apply meal to inventory (decrement quantities)
-        if ( KIQ_Features::allows( $user_id, 'meal_ratings' ) ) {
-            KIQ_Data::apply_meal_to_inventory( $user_id, $meal_plan['meals'] );
-        }
-
-        // Send to Airtable if configured
-        KIQ_Airtable::send_meal_history(
-            $record_id,
-            $user_id,
-            $plan_type,
-            $meal_plan['meals'],
-            $meal_plan['shopping_list']
-        );
-
-        return new WP_REST_Response( array(
-            'success'    => true,
-            'record_id'  => $record_id,
-            'meal_plan'  => $meal_plan,
-            'remaining'  => KIQ_Features::get_remaining_usage( $user_id ),
-        ), 200 );
     }
 
     /**

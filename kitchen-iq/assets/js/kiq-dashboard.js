@@ -211,6 +211,17 @@ class KitchenIQDashboard {
                 });
 
                 const data = await response.json();
+                
+                // Better error handling
+                if ( !response.ok ) {
+                    const errorMsg = data.message || data.error || `Error: ${response.status}`;
+                    console.error('Inventory scan error:', response.status, data);
+                    this.showNotification(errorMsg, 'error');
+                    btn.textContent = originalText;
+                    btn.disabled = false;
+                    return;
+                }
+                
                 if (data.success) {
                     this.inventory = data.inventory;
                     this.renderInventory();
@@ -225,7 +236,7 @@ class KitchenIQDashboard {
             reader.readAsDataURL(file);
         } catch (error) {
             console.error('Image upload error:', error);
-            this.showNotification('Error processing image', 'error');
+            this.showNotification('Error: ' + error.message, 'error');
             btn.textContent = originalText;
             btn.disabled = false;
         }
@@ -254,6 +265,17 @@ class KitchenIQDashboard {
             });
 
             const data = await response.json();
+            
+            // Better error handling - log the response
+            if ( !response.ok ) {
+                const errorMsg = data.message || data.error || 'Unknown error';
+                console.error('Meals API error:', response.status, errorMsg, data);
+                this.showNotification(errorMsg || 'Error generating meals', 'error');
+                btn.textContent = originalText;
+                btn.disabled = false;
+                return;
+            }
+            
             if (data.success || data.meals) {
                 this.mealPlan = data.meal_plan || data;
                 this.renderMealPlan();

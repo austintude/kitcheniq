@@ -23,6 +23,11 @@ class KIQ_AI {
             return new WP_Error( 'missing_api_key', 'OpenAI API key not configured. Please contact your site administrator.' );
         }
 
+        if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+            error_log( sprintf( "KIQ: generate_meal_plan start - user_id=%s plan_type=%s mood=%s inventory_count=%d", intval( $user_id ), esc_html( $plan_type ), $mood ? esc_html( $mood ) : 'none', is_array( $inventory ) ? count( $inventory ) : 0 ) );
+            error_log( sprintf( "KIQ: profile snapshot: %s", substr( wp_json_encode( $profile ), 0, 800 ) ) );
+        }
+
         // Check feature access
         if ( ! KIQ_Features::can_generate_meal( $user_id ) ) {
             return new WP_Error( 'rate_limit', 'Meal generation limit reached for this week' );
@@ -56,6 +61,10 @@ class KIQ_AI {
             ),
         );
 
+        if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+            error_log( sprintf( "KIQ: call_openai payload model=%s messages=%d", $payload['model'], count( $payload['messages'] ) ) );
+        }
+
         $response = self::call_openai( $payload );
 
         if ( is_wp_error( $response ) ) {
@@ -65,7 +74,13 @@ class KIQ_AI {
         // Parse JSON response
         $parsed = json_decode( $response['content'], true );
         if ( ! $parsed ) {
+            error_log( 'KIQ: generate_meal_plan failed to parse AI response. Raw content: ' . substr( $response['content'] ?? '', 0, 800 ) );
             return new WP_Error( 'invalid_json', 'Failed to parse meal plan from AI' );
+        }
+
+        if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+            error_log( 'KIQ: generate_meal_plan parsed meal_plan keys: ' . implode( ',', array_keys( $parsed ) ) );
+            error_log( 'KIQ: generate_meal_plan meals count: ' . ( is_array( $parsed['meals'] ) ? count( $parsed['meals'] ) : 0 ) );
         }
 
         // Log the request if enabled
@@ -78,6 +93,10 @@ class KIQ_AI {
         // Increment usage
         KIQ_Data::increment_meal_count( $user_id );
 
+        if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+            error_log( sprintf( "KIQ: generate_meal_plan complete - user_id=%s, meals=%d", intval( $user_id ), is_array( $parsed['meals'] ) ? count( $parsed['meals'] ) : 0 ) );
+        }
+
         return $parsed;
     }
 
@@ -88,6 +107,10 @@ class KIQ_AI {
         if ( ! KIQ_API_KEY || empty( KIQ_API_KEY ) ) {
             error_log( 'KitchenIQ: OpenAI API key not configured. Set KIQ_API_KEY environment variable or configure in WordPress admin (KitchenIQ → API Key).' );
             return new WP_Error( 'missing_api_key', 'OpenAI API key not configured. Please contact your site administrator.' );
+        }
+
+        if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+            error_log( sprintf( "KIQ: extract_pantry_from_image start - user_id=%s image_url_len=%d", intval( $user_id ), strlen( $image_url ) ) );
         }
 
         // Check feature access
@@ -141,7 +164,12 @@ class KIQ_AI {
         // Parse response
         $parsed = json_decode( $response['content'], true );
         if ( ! $parsed ) {
+            error_log( 'KIQ: extract_pantry_from_image failed to parse AI response. Raw content: ' . substr( $response['content'] ?? '', 0, 800 ) );
             return new WP_Error( 'invalid_json', 'Failed to parse pantry items from image' );
+        }
+
+        if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+            error_log( 'KIQ: extract_pantry_from_image parsed items count: ' . ( is_array( $parsed['items'] ) ? count( $parsed['items'] ) : 0 ) );
         }
 
         // Increment scan count
@@ -167,6 +195,9 @@ class KIQ_AI {
         if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
             error_log( 'KitchenIQ: Sending request to OpenAI with model: ' . ( $payload['model'] ?? 'unknown' ) );
             error_log( 'KitchenIQ: Request payload size: ' . strlen( wp_json_encode( $payload ) ) . ' bytes' );
+            // redact long strings in messages for log brevity
+            $sample = wp_json_encode( array_slice( $payload['messages'], 0, 1 ) );
+            error_log( 'KitchenIQ: Message sample: ' . substr( $sample, 0, 600 ) );
         }
 
         $response = wp_remote_post( self::API_ENDPOINT, $args );
@@ -184,7 +215,7 @@ class KIQ_AI {
         // Log HTTP status and response for diagnostics
         if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
             error_log( 'KitchenIQ: OpenAI HTTP status: ' . $http_code );
-            error_log( 'KitchenIQ: OpenAI response body: ' . substr( $body_raw, 0, 500 ) );
+            error_log( 'KitchenIQ: OpenAI response body: ' . substr( $body_raw, 0, 1000 ) );
         }
 
         // Check for API errors
@@ -202,6 +233,8 @@ class KIQ_AI {
 
         if ( ! isset( $body['choices'][0]['message']['content'] ) ) {
             error_log( 'KitchenIQ: Invalid response format from OpenAI. Keys: ' . implode( ', ', array_keys( $body ) ) );
+            // include body preview for easier debugging
+            error_log( 'KitchenIQ: OpenAI invalid response preview: ' . substr( $body_raw, 0, 1200 ) );
             return new WP_Error( 'invalid_response', 'Unexpected OpenAI response format' );
         }
 
@@ -224,12 +257,12 @@ class KIQ_AI {
             );
         }
 
-        // Validate key format
-        if ( ! preg_match( '/^sk-[a-zA-Z0-9]{20,}/', KIQ_API_KEY ) ) {
+        // Validate key format (both old sk-xxx and new sk-proj-xxx formats)
+        if ( ! preg_match( '/^sk-(proj-)?[a-zA-Z0-9-]{10,}/', KIQ_API_KEY ) ) {
             return array(
                 'status' => 'error',
-                'message' => 'API key format invalid (should start with sk-)',
-                'api_key_preview' => substr( KIQ_API_KEY, 0, 10 ) . '...',
+                'message' => 'API key format invalid (should start with sk- or sk-proj-)',
+                'api_key_preview' => substr( KIQ_API_KEY, 0, 15 ) . '...',
             );
         }
 
