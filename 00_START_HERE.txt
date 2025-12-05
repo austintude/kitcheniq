@@ -136,9 +136,16 @@ INSTALLATION: 5 minutes
   5. Done!
 
 CONFIGURATION: 2 minutes
-  1. Add OpenAI API key (env variable)
-  2. (Optional) Add Airtable keys (analytics)
-  3. Configure admin settings if desired
+  METHOD 1 (Easy - Recommended):
+    1. Go to WordPress Admin → KitchenIQ → API Key
+    2. Paste your OpenAI API key (get from openai.com/account/api-keys)
+    3. (Optional) Add Airtable keys for analytics
+    4. Click Save Changes
+  
+  METHOD 2 (Production - Secure):
+    1. Set KIQ_API_KEY environment variable
+    2. (Optional) Set AIRTABLE_API_KEY and AIRTABLE_BASE_ID
+    Note: Environment variables take priority and are more secure
 
 TESTING: 3 minutes
   1. Complete onboarding form

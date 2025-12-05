@@ -3,7 +3,7 @@
 ## 🚀 Quick Start (30 seconds)
 1. Copy `kitchen-iq` folder to `/wp-content/plugins/`
 2. Activate in WordPress Admin
-3. Set `KIQ_API_KEY` environment variable
+3. **NEW:** Go to WordPress Admin → KitchenIQ → API Key (or set `KIQ_API_KEY` environment variable)
 4. Add page with shortcode: `[kitchen_iq_dashboard]`
 5. Done!
 
@@ -16,7 +16,7 @@ kitchen-iq/
 │   ├── class-kiq-ai.php        OpenAI integration
 │   ├── class-kiq-rest.php      API endpoints
 │   ├── class-kiq-features.php  Tier logic
-│   ├── class-kiq-admin.php     Settings panel
+│   ├── class-kiq-admin.php     Settings panel (NEW: API Key settings)
 │   ├── class-kiq-activator.php DB setup
 │   └── class-kiq-airtable.php  Analytics
 ├── assets/
@@ -27,12 +27,24 @@ kitchen-iq/
 └── README.md                   Full docs
 ```
 
-## 🔑 Environment Variables
+## 🔑 Configuration Methods (Priority Order)
+### Method 1: Environment Variable (Recommended for Production)
 ```bash
+# In .env, wp-config.php, or server configuration:
 KIQ_API_KEY=sk-...              # OpenAI (required)
 AIRTABLE_API_KEY=key-...        # Analytics (optional)
 AIRTABLE_BASE_ID=app-...        # Analytics (optional)
 ```
+
+### Method 2: WordPress Admin Panel (Easiest for Testing/Shared Hosting)
+1. Go to WordPress Admin → KitchenIQ → API Key
+2. Paste your OpenAI API key
+3. (Optional) Add Airtable credentials
+4. Click Save Changes
+5. Status will show "✓ Configured"
+
+**Note:** Environment variables take priority over admin panel settings for security.
+
 
 ## 💾 Database Tables
 | Table | Purpose |

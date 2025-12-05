@@ -36,6 +36,15 @@ class KIQ_Admin {
 
         add_submenu_page(
             'kitcheniq',
+            'API Key Configuration',
+            'API Key',
+            'manage_options',
+            'kitcheniq-api-key',
+            array( __CLASS__, 'render_api_key_settings' )
+        );
+
+        add_submenu_page(
+            'kitcheniq',
             'AI Settings',
             'AI Settings',
             'manage_options',
@@ -72,6 +81,51 @@ class KIQ_Admin {
     }
 
     public static function register_settings() {
+        // API Key Settings
+        register_setting( 'kitcheniq_api_key', 'kiq_api_key_setting', array(
+            'sanitize_callback' => array( __CLASS__, 'sanitize_api_key' ),
+            'type' => 'string'
+        ) );
+        register_setting( 'kitcheniq_api_key', 'kiq_airtable_key_setting', array(
+            'sanitize_callback' => 'sanitize_text_field',
+            'type' => 'string'
+        ) );
+        register_setting( 'kitcheniq_api_key', 'kiq_airtable_base_id_setting', array(
+            'sanitize_callback' => 'sanitize_text_field',
+            'type' => 'string'
+        ) );
+
+        add_settings_section(
+            'kitcheniq_api_key_section',
+            'API Configuration',
+            array( __CLASS__, 'render_api_key_section' ),
+            'kitcheniq_api_key'
+        );
+
+        add_settings_field(
+            'kiq_api_key_setting',
+            'OpenAI API Key',
+            array( __CLASS__, 'render_field_api_key' ),
+            'kitcheniq_api_key',
+            'kitcheniq_api_key_section'
+        );
+
+        add_settings_field(
+            'kiq_airtable_key_setting',
+            'Airtable API Key (Optional)',
+            array( __CLASS__, 'render_field_airtable_key' ),
+            'kitcheniq_api_key',
+            'kitcheniq_api_key_section'
+        );
+
+        add_settings_field(
+            'kiq_airtable_base_id_setting',
+            'Airtable Base ID (Optional)',
+            array( __CLASS__, 'render_field_airtable_base_id' ),
+            'kitcheniq_api_key',
+            'kitcheniq_api_key_section'
+        );
+
         // General Settings
         register_setting( 'kitcheniq_general', 'kiq_default_plan_type' );
         register_setting( 'kitcheniq_general', 'kiq_inventory_confirm_limit' );
@@ -447,6 +501,134 @@ class KIQ_Admin {
 
     public static function render_ai_section_info() {
         esc_html_e( 'Configure AI model parameters', 'kitchen-iq' );
+    }
+
+    /**
+     * Render API Key settings page
+     */
+    public static function render_api_key_settings() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( 'Unauthorized' );
+        }
+
+        $api_key = get_option( 'kiq_api_key_setting', '' );
+        $env_api_key = getenv( 'KIQ_API_KEY' );
+        $api_key_configured = ! empty( $api_key ) || ! empty( $env_api_key );
+        ?>
+        <div class="wrap">
+            <h1>KitchenIQ API Key Configuration</h1>
+            
+            <div style="background: #f0f0f0; padding: 15px; margin: 20px 0; border-left: 4px solid #0073aa;">
+                <h3 style="margin-top: 0;">Configuration Status</h3>
+                <?php if ( $api_key_configured ) : ?>
+                    <p style="color: green; font-weight: bold;">✓ OpenAI API Key Configured</p>
+                    <?php if ( ! empty( $env_api_key ) ) : ?>
+                        <p><em>Source: Environment Variable (KIQ_API_KEY)</em></p>
+                    <?php elseif ( ! empty( $api_key ) ) : ?>
+                        <p><em>Source: WordPress Database</em></p>
+                    <?php endif; ?>
+                <?php else : ?>
+                    <p style="color: red; font-weight: bold;">✗ OpenAI API Key Not Configured</p>
+                    <p>The plugin requires an OpenAI API key to generate meal plans and analyze pantry images.</p>
+                <?php endif; ?>
+            </div>
+
+            <form method="post" action="options.php">
+                <?php settings_fields( 'kitcheniq_api_key' ); ?>
+                <?php do_settings_sections( 'kitcheniq_api_key' ); ?>
+                <?php submit_button(); ?>
+            </form>
+
+            <div style="margin-top: 30px; background: #fff3cd; padding: 15px; border: 1px solid #ffc107;">
+                <h3>How to Get Your API Keys</h3>
+                <h4>OpenAI API Key:</h4>
+                <ol>
+                    <li>Visit <a href="https://platform.openai.com/account/api-keys" target="_blank">OpenAI API Keys</a></li>
+                    <li>Sign in with your OpenAI account (create one if needed)</li>
+                    <li>Click "Create new secret key"</li>
+                    <li>Copy the key and paste it below</li>
+                    <li><strong>Note:</strong> OpenAI may charge based on API usage</li>
+                </ol>
+                
+                <h4>Airtable API Key (Optional):</h4>
+                <ol>
+                    <li>Visit <a href="https://airtable.com/account" target="_blank">Airtable Account Settings</a></li>
+                    <li>Click "API"</li>
+                    <li>Generate a personal access token</li>
+                    <li>Copy and paste below (used for analytics)</li>
+                </ol>
+            </div>
+        </div>
+        <?php
+    }
+
+    /**
+     * Render API Key section description
+     */
+    public static function render_api_key_section() {
+        echo 'Configure your API keys for external services. The OpenAI API key is required for meal plan generation.';
+    }
+
+    /**
+     * Render OpenAI API Key field
+     */
+    public static function render_field_api_key() {
+        $value = get_option( 'kiq_api_key_setting', '' );
+        $env_key = getenv( 'KIQ_API_KEY' );
+        ?>
+        <input type="password" name="kiq_api_key_setting" value="<?php echo esc_attr( $value ); ?>" style="width: 100%; max-width: 500px;" placeholder="sk-..."/>
+        <p class="description">
+            Your OpenAI API key (starts with "sk-"). 
+            <?php if ( ! empty( $env_key ) ) : ?>
+                <strong>Note: An environment variable (KIQ_API_KEY) is already configured and takes priority over this setting.</strong>
+            <?php endif; ?>
+        </p>
+        <?php
+    }
+
+    /**
+     * Render Airtable API Key field
+     */
+    public static function render_field_airtable_key() {
+        $value = get_option( 'kiq_airtable_key_setting', '' );
+        ?>
+        <input type="password" name="kiq_airtable_key_setting" value="<?php echo esc_attr( $value ); ?>" style="width: 100%; max-width: 500px;" placeholder="pat..."/>
+        <p class="description">Optional: Used for analytics synchronization to Airtable</p>
+        <?php
+    }
+
+    /**
+     * Render Airtable Base ID field
+     */
+    public static function render_field_airtable_base_id() {
+        $value = get_option( 'kiq_airtable_base_id_setting', '' );
+        ?>
+        <input type="text" name="kiq_airtable_base_id_setting" value="<?php echo esc_attr( $value ); ?>" style="width: 100%; max-width: 500px;" placeholder="appXXXXXXXXXXXXXX"/>
+        <p class="description">Optional: Your Airtable base ID</p>
+        <?php
+    }
+
+    /**
+     * Sanitize and validate API key
+     */
+    public static function sanitize_api_key( $value ) {
+        $value = sanitize_text_field( $value );
+        
+        if ( empty( $value ) ) {
+            return '';
+        }
+
+        // Validate OpenAI API key format (should start with sk-)
+        if ( ! preg_match( '/^sk-[a-zA-Z0-9]+/', $value ) ) {
+            add_settings_error(
+                'kiq_api_key_setting',
+                'invalid_api_key',
+                'Warning: The API key does not appear to be a valid OpenAI key (should start with "sk-"). Please verify you copied the correct key.',
+                'warning'
+            );
+        }
+
+        return $value;
     }
 
     public static function render_field_text_model() {

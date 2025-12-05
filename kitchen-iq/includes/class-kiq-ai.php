@@ -18,8 +18,9 @@ class KIQ_AI {
      * Generate meal plan using OpenAI
      */
     public static function generate_meal_plan( $user_id, $profile, $inventory, $plan_type = 'balanced', $mood = null ) {
-        if ( ! KIQ_API_KEY ) {
-            return new WP_Error( 'missing_api_key', 'OpenAI API key not configured' );
+        if ( ! KIQ_API_KEY || empty( KIQ_API_KEY ) ) {
+            error_log( 'KitchenIQ: OpenAI API key not configured. Set KIQ_API_KEY environment variable or configure in WordPress admin (KitchenIQ → API Key).' );
+            return new WP_Error( 'missing_api_key', 'OpenAI API key not configured. Please contact your site administrator.' );
         }
 
         // Check feature access
@@ -84,8 +85,9 @@ class KIQ_AI {
      * Extract pantry items from image using vision
      */
     public static function extract_pantry_from_image( $user_id, $image_url ) {
-        if ( ! KIQ_API_KEY ) {
-            return new WP_Error( 'missing_api_key', 'OpenAI API key not configured' );
+        if ( ! KIQ_API_KEY || empty( KIQ_API_KEY ) ) {
+            error_log( 'KitchenIQ: OpenAI API key not configured. Set KIQ_API_KEY environment variable or configure in WordPress admin (KitchenIQ → API Key).' );
+            return new WP_Error( 'missing_api_key', 'OpenAI API key not configured. Please contact your site administrator.' );
         }
 
         // Check feature access

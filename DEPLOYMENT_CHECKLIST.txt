@@ -1,0 +1,396 @@
+# 🎯 DEPLOYMENT CHECKLIST - KitchenIQ v0.1.1
+
+## Pre-Deployment (Before You Start)
+
+- [ ] **Backup Original**
+  - Back up `/wp-content/plugins/kitchen-iq/` directory
+  - Keep a copy safe in case of rollback
+
+- [ ] **Review Changes**
+  - Read CHANGES_V0.1.1.txt (3 minutes)
+  - Understand what changed and why
+  
+- [ ] **Read Setup Guide**
+  - Review SETUP_GUIDE.md
+  - Choose your configuration method
+  
+- [ ] **Verify Prerequisites**
+  - WordPress 5.0 or higher
+  - PHP 7.4 or higher
+  - OpenAI API key ready (or know how to get it)
+  - Admin access to WordPress
+
+---
+
+## Deployment Steps
+
+### Step 1: Update Plugin Files (5 minutes)
+
+- [ ] **Replace kitchen-iq.php**
+  - Location: `/wp-content/plugins/kitchen-iq/kitchen-iq.php`
+  - Verify: File size ~4 KB, contains fallback logic
+
+- [ ] **Replace class-kiq-admin.php**
+  - Location: `/wp-content/plugins/kitchen-iq/includes/class-kiq-admin.php`
+  - Verify: File size ~25 KB, contains new API Key functions
+
+- [ ] **Replace class-kiq-ai.php**
+  - Location: `/wp-content/plugins/kitchen-iq/includes/class-kiq-ai.php`
+  - Verify: File size ~14 KB, contains improved error handling
+
+- [ ] **Verify All Files**
+  - Count files: `/wp-content/plugins/kitchen-iq/` should have 13 files
+  - Check permissions: Files readable, directory writable
+
+### Step 2: Activate Plugin (2 minutes)
+
+- [ ] **WordPress Admin Login**
+  - Log in as administrator
+  
+- [ ] **Navigate to Plugins**
+  - Go to: WordPress Admin → Plugins
+  
+- [ ] **Find KitchenIQ**
+  - Search for "kitchen-iq"
+  - Should show: KitchenIQ - AI-Powered Kitchen Intelligence System
+
+- [ ] **Activate or Reactivate**
+  - If not active: Click "Activate"
+  - If already active: Click "Deactivate" then "Activate"
+  
+- [ ] **Check for Errors**
+  - Should see message: "Plugin activated successfully"
+  - Should NOT see any error messages
+  - ⚠️ If you see errors, check the debug panel
+
+### Step 3: Verify Plugin Loaded (2 minutes)
+
+- [ ] **Check Admin Menu**
+  - WordPress Admin dashboard should show "KitchenIQ" menu
+  - Should have these submenus:
+    - General
+    - **API Key** ← NEW! This proves update worked
+    - AI Settings
+    - Prompts
+    - Perishability
+    - Debug
+
+- [ ] **Check No Errors**
+  - No fatal errors on screen
+  - No warnings about missing functions
+  - Dashboard loads normally
+
+### Step 4: Configure API Key (3 minutes)
+
+Choose ONE of these three methods:
+
+#### METHOD A: Admin Panel (EASIEST - Recommended)
+- [ ] Click: WordPress Admin → KitchenIQ → **API Key**
+- [ ] Page should show:
+  - "Configuration Status" box
+  - Status shows: "✗ API Key Not Configured"
+  - Form with input fields
+  - Help section with links
+
+- [ ] Get OpenAI API Key:
+  - Visit: https://platform.openai.com/account/api-keys
+  - Sign in or create account
+  - Click "Create new secret key"
+  - Copy the key (starts with "sk-")
+
+- [ ] Add to WordPress:
+  - Paste key into "OpenAI API Key" field
+  - Leave Airtable fields empty (optional)
+  - Click "Save Changes"
+  - Status should change to: "✓ API Key Configured"
+
+- [ ] Verify Saved:
+  - Refresh page
+  - Status still shows: "✓ API Key Configured"
+  - No errors appear
+
+#### METHOD B: Environment Variable (PRODUCTION - Secure)
+- [ ] Set Environment Variable on your server
+  - Variable name: `KIQ_API_KEY`
+  - Variable value: Your OpenAI API key (sk-...)
+  - Method depends on your hosting provider:
+    - SiteGround: cPanel → Environment Variables
+    - WP Engine: Environment tab
+    - Other: Ask your hosting provider
+
+- [ ] Verify Set:
+  - WordPress Admin → KitchenIQ → API Key
+  - Status should show: "✓ API Key Configured"
+  - Source should show: "Environment Variable (KIQ_API_KEY)"
+
+#### METHOD C: wp-config.php (FALLBACK)
+- [ ] Edit wp-config.php:
+  - Location: WordPress root directory `/wp-config.php`
+  - Find: `/* That's all, stop editing! That is all, stop editing!`
+  - Add BEFORE that line:
+    ```php
+    define( 'KIQ_API_KEY', 'sk-your-key-here' );
+    ```
+  - Save file
+
+- [ ] Verify Configured:
+  - WordPress Admin → KitchenIQ → API Key
+  - Status shows: "✓ API Key Configured"
+
+### Step 5: Verify Configuration (2 minutes)
+
+- [ ] **Check Status Page**
+  - WordPress Admin → KitchenIQ → API Key
+  - Status box shows: "✓ API Key Configured"
+  - If not, go back to Step 4
+
+- [ ] **Check Debug Panel**
+  - WordPress Admin → KitchenIQ → Debug
+  - Plugin Status section:
+    - Version: 0.1.1
+    - API Key Configured: ✓
+    - Database Tables: ✓
+    - REST API: ✓
+
+- [ ] **No Error Logs**
+  - Check WordPress debug.log (if enabled)
+  - Should not see "KIQ_API_KEY" errors
+
+### Step 6: Test Functionality (4 minutes)
+
+- [ ] **Find KitchenIQ Page**
+  - In WordPress, find page with shortcode: `[kitchen_iq_dashboard]`
+  - Or create test page with this shortcode
+  
+- [ ] **Load Dashboard**
+  - Go to that page
+  - Dashboard should load without errors
+  - Should see onboarding form or previous data
+
+- [ ] **Generate Meal Plan**
+  - Complete or skip onboarding
+  - Click "Generate Meal Plan"
+  - Should generate successfully
+  - Takes 15-30 seconds
+  - Should show 3 meals with recipes
+
+- [ ] **Scan Pantry Image**
+  - Click "Scan Pantry"
+  - Take photo or upload image
+  - Image uploads successfully
+  - Takes 10-20 seconds
+  - Should show extracted items
+
+- [ ] **All Features Working**
+  - No error messages appear
+  - Response time is reasonable
+  - Data displays correctly
+
+---
+
+## Post-Deployment Verification
+
+### Verify Configuration Persists
+- [ ] Log out of WordPress
+- [ ] Log back in as different user
+- [ ] Check: WordPress Admin → KitchenIQ → API Key
+- [ ] Status still shows: ✓ Configured
+
+### Verify with Environment Variable (if set)
+- [ ] Clear admin panel API key (if set)
+- [ ] Go back to API Key settings page
+- [ ] Status still shows: ✓ Configured (from env var)
+- [ ] Source shows: "Environment Variable"
+
+### Verify Error Handling
+- [ ] Temporarily clear both API key sources (not recommended for production)
+- [ ] Try to generate meal plan
+- [ ] Should show clear error message
+- [ ] Should NOT show blank page or crash
+- [ ] Restore API key after testing
+
+### Check for Errors
+- [ ] WordPress dashboard: No errors
+- [ ] WordPress debug.log: No fatal errors
+- [ ] Browser console: No JavaScript errors (F12)
+- [ ] REST API: Accessible at /wp-json/kiq/v1/
+
+---
+
+## Troubleshooting During Deployment
+
+### Problem: Plugin shows "Critical Error" on activation
+**Solution:**
+1. Check PHP version (must be 7.4+)
+2. Check WordPress version (must be 5.0+)
+3. Check debug panel for error details
+4. Verify all 3 files were updated correctly
+
+### Problem: API Key page doesn't appear in menu
+**Solution:**
+1. Deactivate and reactivate plugin
+2. Clear WordPress cache (if using cache plugin)
+3. Hard refresh browser (Ctrl+F5)
+4. Check file permissions (files must be readable)
+
+### Problem: Configuration form won't load
+**Solution:**
+1. Check browser console for JavaScript errors (F12)
+2. Check WordPress debug.log for PHP errors
+3. Verify all form field rendering functions are in place
+
+### Problem: API key won't save
+**Solution:**
+1. Verify WordPress is writable (not in maintenance mode)
+2. Check user has admin capabilities
+3. Check database connection
+4. Look for sanitization errors in debug log
+
+### Problem: Status still shows "✗ Not Configured"
+**Solution:**
+1. Verify API key was saved (refresh page)
+2. Check if using environment variable (takes priority)
+3. Check WordPress debug.log for errors
+4. Try method B or C instead of admin panel
+
+### Problem: Meal plan generation fails after configuring key
+**Solution:**
+1. Verify API key format (must start with "sk-")
+2. Check API key is valid and not expired
+3. Check OpenAI account has credits/balance
+4. Check for rate limiting (if many requests)
+5. Check WordPress debug.log for API response errors
+
+---
+
+## Performance Checks
+
+- [ ] **Page Load Time**
+  - KitchenIQ dashboard page: < 3 seconds
+  - Admin → API Key page: < 1 second
+
+- [ ] **Feature Response Time**
+  - Generate meal plan: 15-30 seconds (API dependent)
+  - Scan pantry: 10-20 seconds (API dependent)
+
+- [ ] **Database Performance**
+  - No slow query warnings
+  - Tables created on activation
+  - User data saving correctly
+
+---
+
+## Security Verification
+
+- [ ] **API Key Not Visible**
+  - Admin panel shows: ••••••••• (not actual key)
+  - Page source doesn't expose key
+  - Emails/logs don't expose key
+
+- [ ] **Admin-Only Access**
+  - Non-admin user cannot access API Key page
+  - Should get: "Unauthorized" message
+
+- [ ] **Form Validation**
+  - Invalid key format shows warning
+  - But still allows save (warning only)
+
+- [ ] **Database Security**
+  - Check wp_options table
+  - Should NOT see plain text API key
+  - WordPress encryption in place
+
+---
+
+## Documentation Verification
+
+- [ ] **Files Downloaded**
+  - Have access to these files:
+    - SETUP_GUIDE.md
+    - QUICK_REFERENCE.md
+    - UPDATE_LOG.md (if needed)
+
+- [ ] **Documentation Readable**
+  - Can open and read files
+  - Links are clickable
+  - All steps are clear
+
+---
+
+## Rollback Plan (If Something Goes Wrong)
+
+If deployment fails and you need to rollback to v0.1.0:
+
+1. **Delete Current Files**
+   ```
+   rm /wp-content/plugins/kitchen-iq/kitchen-iq.php
+   rm /wp-content/plugins/kitchen-iq/includes/class-kiq-admin.php
+   rm /wp-content/plugins/kitchen-iq/includes/class-kiq-ai.php
+   ```
+
+2. **Restore from Backup**
+   ```
+   cp ~/backup/kitchen-iq.php /wp-content/plugins/kitchen-iq/
+   cp ~/backup/class-kiq-admin.php /wp-content/plugins/kitchen-iq/includes/
+   cp ~/backup/class-kiq-ai.php /wp-content/plugins/kitchen-iq/includes/
+   ```
+
+3. **Reactivate Plugin**
+   - WordPress Admin → Plugins → Activate KitchenIQ
+   - Should work as before
+
+4. **Contact Support** with error details for v0.1.1
+
+---
+
+## Success Criteria ✓
+
+You've successfully deployed v0.1.1 when:
+
+✅ Plugin activates without errors
+✅ API Key menu appears in WordPress admin
+✅ Can access API Key settings page
+✅ Can configure API key via admin form
+✅ Status shows ✓ Configured
+✅ Meal plan generation works
+✅ Pantry scanning works
+✅ All features functional
+✅ No error messages appear
+✅ Error handling shows helpful messages
+
+---
+
+## Final Checklist
+
+### Before Telling Others It's Ready:
+- [ ] Tested on staging environment
+- [ ] Tested on production environment
+- [ ] All 6 success criteria met
+- [ ] Documentation reviewed
+- [ ] Team notified of update
+- [ ] Users can access new features
+
+### Ready for Users:
+- [ ] Update shared with team
+- [ ] Instructions provided to non-technical users
+- [ ] API key procurement process documented
+- [ ] Support contact information provided
+- [ ] Monitoring enabled for errors
+
+---
+
+## Deployment Complete! ✅
+
+**Congratulations! Your KitchenIQ plugin is now v0.1.1 and ready for use.**
+
+If you completed all checkboxes above, your deployment is successful!
+
+**Next step:** Share with your team and start using the new admin panel configuration feature.
+
+---
+
+**Deployment Date:** ________________  
+**Deployed By:** ________________  
+**Notes:** ________________  
+
+Print this checklist and check off items as you go!

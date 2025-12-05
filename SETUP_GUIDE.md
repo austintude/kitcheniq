@@ -23,6 +23,23 @@
 
 **Option A: Via Environment Variables (Recommended)**
 
+### Option A: WordPress Admin Panel (EASIEST - Recommended for Testing/Shared Hosting)
+
+1. WordPress Admin → KitchenIQ → **API Key**
+2. Paste your OpenAI API key (starts with "sk-")
+3. (Optional) Add Airtable credentials
+4. Click Save Changes
+5. Status will show "✓ API Key Configured"
+
+**How to get your OpenAI API key:**
+1. Visit https://platform.openai.com/account/api-keys
+2. Sign in with your OpenAI account (create one if needed)
+3. Click "Create new secret key"
+4. Copy the key and paste it in the KitchenIQ admin panel
+5. Note: OpenAI charges based on actual API usage (~$0.01 per meal plan)
+
+### Option B: Environment Variables (RECOMMENDED FOR PRODUCTION)
+
 Add to your WordPress hosting environment:
 ```bash
 KIQ_API_KEY=sk-your-openai-api-key-here
@@ -36,11 +53,16 @@ For **SiteGround**, set environment variables via cPanel:
 3. Add `KIQ_API_KEY` with your OpenAI API key value
 4. Add `AIRTABLE_API_KEY` and `AIRTABLE_BASE_ID` if using analytics
 
-**Option B: Via wp-config.php**
+**Priority:** Environment variables take priority over admin panel settings for security.
 
-Edit `/wp-content/plugins/kitchen-iq/kitchen-iq.php` and set constants:
+### Option C: Via wp-config.php (Emergency Fallback)
+
+Edit `/wp-config.php` in your WordPress root:
 ```php
+// Add before the "That's all, stop editing!" line:
 define( 'KIQ_API_KEY', 'sk-...' );
+define( 'AIRTABLE_API_KEY', 'key-...' );
+define( 'AIRTABLE_BASE_ID', 'app-...' );
 ```
 
 ### 4. Set Up WordPress Page
@@ -56,6 +78,7 @@ define( 'KIQ_API_KEY', 'sk-...' );
 WordPress Admin → KitchenIQ → General Settings
 
 Common configurations:
+- **API Key:** Already configured above ✓
 - **AI Settings:** Keep defaults (gpt-4o-mini, temp 0.3)
 - **Prompts:** Advanced users only - all defaults are optimized
 - **Perishability:** Adjust if your defaults differ

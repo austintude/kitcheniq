@@ -18,16 +18,26 @@ if ( ! defined( 'ABSPATH' ) ) {
 // Define constants
 define( 'KIQ_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'KIQ_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
-define( 'KIQ_VERSION', '0.1.0' );
+define( 'KIQ_VERSION', '0.1.1' );
 
-// AI configuration constants (move to wp-config.php in production)
-define( 'KIQ_AI_API_KEY', getenv( 'OPENAI_API_KEY' ) ?: 'your_openai_api_key_here' );
+// API Key configuration - check environment first, then WordPress options
+// This allows flexibility: env vars for production, admin panel for testing
+if ( getenv( 'KIQ_API_KEY' ) ) {
+    define( 'KIQ_API_KEY', getenv( 'KIQ_API_KEY' ) );
+} elseif ( function_exists( 'get_option' ) ) {
+    define( 'KIQ_API_KEY', get_option( 'kiq_api_key_setting', '' ) );
+} else {
+    define( 'KIQ_API_KEY', '' );
+}
+
+// Airtable (optional analytics)
+define( 'KIQ_AIRTABLE_API_KEY', getenv( 'AIRTABLE_API_KEY' ) ?: ( function_exists( 'get_option' ) ? get_option( 'kiq_airtable_key_setting', '' ) : '' ) );
+define( 'KIQ_AIRTABLE_BASE_ID', getenv( 'AIRTABLE_BASE_ID' ) ?: ( function_exists( 'get_option' ) ? get_option( 'kiq_airtable_base_setting', '' ) : '' ) );
+define( 'KIQ_AIRTABLE_TABLE_NAME', 'MealHistory' );
+
+// Model configuration
 define( 'KIQ_AI_TEXT_MODEL', 'gpt-4o-mini' );
 define( 'KIQ_AI_VISION_MODEL', 'gpt-4o-mini' );
-
-// Airtable constants (optional - move to wp-config.php in production)
-define( 'KIQ_AIRTABLE_API_KEY', getenv( 'AIRTABLE_API_KEY' ) ?: '' );
-define( 'KIQ_AIRTABLE_BASE_ID', getenv( 'AIRTABLE_BASE_ID' ) ?: '' );
 define( 'KIQ_AIRTABLE_TABLE_NAME', 'MealHistory' );
 
 // Include core classes
