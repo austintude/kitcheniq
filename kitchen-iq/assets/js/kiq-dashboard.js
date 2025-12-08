@@ -19,15 +19,36 @@ class KitchenIQDashboard {
         // Load user profile
         await this.loadProfile();
         
-        // If profile exists, show dashboard, else show onboarding
-        if (this.profile && Object.keys(this.profile).length > 0) {
+        // Decide initial view from URL ?view= or fallback to onboarding/dashboard
+        const params = new URLSearchParams(window.location.search);
+        const initialView = params.get('view');
+        if (initialView) {
+            this.showTab(initialView);
+        } else if (this.profile && Object.keys(this.profile).length > 0) {
             this.showTab('dashboard');
         } else {
             this.showTab('onboarding');
         }
 
+        // If onboarding form present, initialize stepper state
+        this.initOnboardingStepper();
+
         // Attach event listeners
         this.attachEventListeners();
+
+        // If we have a loaded profile, prefill household size and render members
+        try {
+            if (this.profile && this.profile.household_size) {
+                const hs = document.getElementById('household_size');
+                if (hs) hs.value = String(this.profile.household_size);
+            }
+            this.renderMemberInputs();
+        } catch (err) {
+            // ignore if DOM not ready
+        }
+
+        // Attempt to register PWA artifacts (manifest + service worker)
+        this.registerPWA();
     }
 
     async loadProfile() {
@@ -67,16 +88,55 @@ class KitchenIQDashboard {
             });
         });
 
+        // Bottom nav (app-like) routing
+        document.querySelectorAll('.kiq-bottom-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                const route = btn.dataset.route;
+                this.showTab(route);
+                // update bottom nav active state
+                document.querySelectorAll('.kiq-bottom-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            });
+        });
+
+        // Handle back/forward navigation
+        window.addEventListener('popstate', (e) => {
+            const params = new URLSearchParams(window.location.search);
+            const view = params.get('view') || 'dashboard';
+            this.showTab(view);
+        });
+
         // Onboarding form
         const onboardingForm = document.getElementById('kiq-onboarding-form');
         if (onboardingForm) {
             onboardingForm.addEventListener('submit', (e) => this.handleOnboarding(e));
+            // autosave on input changes (debounced)
+            onboardingForm.querySelectorAll('input, select, textarea').forEach(el => {
+                el.addEventListener('input', () => this.scheduleAutosave());
+                el.addEventListener('change', () => this.scheduleAutosave());
+            });
+        }
+
+        // When household size changes, render member inputs
+        const householdSelect = document.getElementById('household_size');
+        if (householdSelect) {
+            householdSelect.addEventListener('change', () => this.renderMemberInputs());
         }
 
         // Meal generation
         const mealGenBtn = document.getElementById('kiq-generate-meals-btn');
         if (mealGenBtn) {
             mealGenBtn.addEventListener('click', () => this.generateMeals());
+        }
+
+        // More ideas button
+        const moreBtn = document.getElementById('kiq-more-ideas-btn');
+        if (moreBtn) {
+            moreBtn.addEventListener('click', () => {
+                const seed = String(Date.now());
+                this.generateMealsWithOptions(seed);
+            });
         }
 
         // Camera upload
@@ -101,6 +161,311 @@ class KitchenIQDashboard {
         const fileInput = document.getElementById('kiq-camera-input');
         if (fileInput) {
             fileInput.addEventListener('change', (e) => this.handleImageUpload(e));
+        }
+
+        // Menu toggle
+        const menuToggle = document.getElementById('kiq-menu-toggle');
+        if (menuToggle) {
+            menuToggle.addEventListener('click', () => {
+                const topNav = document.getElementById('kiq-top-nav');
+                if (topNav) topNav.classList.toggle('hidden');
+            });
+        }
+    }
+
+    /* Members UI */
+    renderMemberInputs() {
+        const container = document.getElementById('kiq-members-container');
+        if (!container) return;
+        container.innerHTML = '';
+
+        const householdSize = parseInt(document.getElementById('household_size')?.value || '2', 10);
+        const target = householdSize >= 9 ? 9 : householdSize; // a cap shown in UI; allow manual add for more
+
+        // If profile has members, prefer that
+        const existing = (this.profile && Array.isArray(this.profile.members)) ? this.profile.members : [];
+
+        for (let i = 0; i < target; i++) {
+            const member = existing[i] || { name: '', appetite: 3, age: '', allergies: [], intolerances: [], dislikes: [] };
+            const idx = i + 1;
+            const el = document.createElement('div');
+            el.className = 'kiq-member';
+            el.dataset.index = i;
+
+            // Name / appetite / age row
+            const row = document.createElement('div');
+            row.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:6px;';
+
+            const nameInput = document.createElement('input');
+            nameInput.className = 'member-name';
+            nameInput.placeholder = `Member ${idx} name`;
+            nameInput.value = member.name || '';
+
+            const appetiteLabel = document.createElement('label');
+            appetiteLabel.style.fontSize = '12px';
+            appetiteLabel.textContent = 'Appetite';
+
+            const appetiteSelect = document.createElement('select');
+            appetiteSelect.className = 'member-appetite';
+            [1,2,3,4,5].forEach(v => {
+                const opt = document.createElement('option'); opt.value = String(v); opt.textContent = String(v);
+                appetiteSelect.appendChild(opt);
+            });
+            appetiteSelect.value = String(member.appetite || 3);
+
+            const ageInput = document.createElement('input');
+            ageInput.className = 'member-age';
+            ageInput.placeholder = 'age';
+            ageInput.style.width = '60px';
+            ageInput.value = member.age || '';
+
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.className = 'btn btn-outline kiq-remove-member';
+            removeBtn.textContent = 'Remove';
+            removeBtn.style.marginLeft = '8px';
+
+            row.appendChild(nameInput);
+            row.appendChild(appetiteLabel);
+            row.appendChild(appetiteSelect);
+            row.appendChild(ageInput);
+            row.appendChild(removeBtn);
+
+            // Allergies/intolerances row
+            const row2 = document.createElement('div');
+            row2.style.cssText = 'display:flex;gap:8px;margin-bottom:10px;';
+            const allergiesInput = document.createElement('input');
+            allergiesInput.className = 'member-allergies';
+            allergiesInput.placeholder = 'Allergies (comma separated)';
+            allergiesInput.style.flex = '1';
+            allergiesInput.value = (member.allergies||[]).join(', ');
+            const intolerancesInput = document.createElement('input');
+            intolerancesInput.className = 'member-intolerances';
+            intolerancesInput.placeholder = 'Intolerances (comma)';
+            intolerancesInput.style.flex = '1';
+            intolerancesInput.value = (member.intolerances||[]).join(', ');
+            row2.appendChild(allergiesInput);
+            row2.appendChild(intolerancesInput);
+
+            // Dislikes row
+            const row3 = document.createElement('div');
+            row3.style.cssText = 'margin-bottom:12px;';
+            const dislikesInput = document.createElement('input');
+            dislikesInput.className = 'member-dislikes';
+            dislikesInput.placeholder = 'Dislikes (comma separated)';
+            dislikesInput.style.width = '100%';
+            dislikesInput.value = (member.dislikes||[]).join(', ');
+            row3.appendChild(dislikesInput);
+
+            // wire remove
+            removeBtn.addEventListener('click', () => {
+                el.remove();
+                this.scheduleAutosave();
+            });
+
+            // attach change listeners to schedule autosave
+            [nameInput, appetiteSelect, ageInput, allergiesInput, intolerancesInput, dislikesInput].forEach(inp => {
+                inp.addEventListener('input', () => this.scheduleAutosave());
+                inp.addEventListener('change', () => this.scheduleAutosave());
+            });
+
+            el.appendChild(row);
+            el.appendChild(row2);
+            el.appendChild(row3);
+
+            container.appendChild(el);
+        }
+
+        // If household size was 9+, offer an Add member button
+        if (parseInt(document.getElementById('household_size')?.value || '2', 10) >= 9) {
+            const addBtn = document.createElement('button');
+            addBtn.type = 'button';
+            addBtn.className = 'btn btn-outline';
+            addBtn.textContent = 'Add member';
+            addBtn.style.marginTop = '8px';
+            addBtn.addEventListener('click', () => {
+                const el = document.createElement('div');
+                el.className = 'kiq-member';
+                el.innerHTML = `
+                    <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+                        <input class="member-name" placeholder="Member name" />
+                        <label style="font-size:12px;">Appetite</label>
+                        <select class="member-appetite">
+                            <option value="1">1</option>
+                            <option value="2">2</option>
+                            <option value="3">3</option>
+                            <option value="4">4</option>
+                            <option value="5">5</option>
+                        </select>
+                        <input class="member-age" placeholder="age" style="width:60px;" />
+                    </div>
+                    <div style="display:flex;gap:8px;margin-bottom:10px;">
+                        <input class="member-allergies" placeholder="Allergies (comma separated)" style="flex:1;" />
+                        <input class="member-intolerances" placeholder="Intolerances (comma)" style="flex:1;" />
+                    </div>
+                    <div style="margin-bottom:12px;">
+                        <input class="member-dislikes" placeholder="Dislikes (comma separated)" style="width:100%;" />
+                    </div>
+                `;
+                el.querySelectorAll('input, select').forEach(inp => {
+                    inp.addEventListener('input', () => this.scheduleAutosave());
+                    inp.addEventListener('change', () => this.scheduleAutosave());
+                });
+                container.appendChild(el);
+            });
+            container.appendChild(addBtn);
+        }
+    }
+
+    /* Onboarding stepper */
+    initOnboardingStepper() {
+        this.onboardStep = 1;
+        const nextBtn = document.getElementById('kiq-step-next');
+        const prevBtn = document.getElementById('kiq-step-prev');
+        if (nextBtn) nextBtn.addEventListener('click', () => this.onboardNext());
+        if (prevBtn) prevBtn.addEventListener('click', () => this.onboardPrev());
+        this.showOnboardStep(this.onboardStep);
+    }
+
+    showOnboardStep(n) {
+        document.querySelectorAll('.onboard-step').forEach(el => el.classList.add('hidden'));
+        const stepEl = document.querySelector(`.onboard-step[data-step="${n}"]`);
+        if (stepEl) stepEl.classList.remove('hidden');
+        document.getElementById('kiq-step-prev').classList.toggle('hidden', n === 1);
+        document.getElementById('kiq-step-next').textContent = n >= document.querySelectorAll('.onboard-step').length ? 'Save' : 'Next →';
+    }
+
+    onboardNext() {
+        const total = document.querySelectorAll('.onboard-step').length;
+        if (this.onboardStep >= total) {
+            // final - submit form
+            const form = document.getElementById('kiq-onboarding-form');
+            if (form) {
+                // call handler directly with a synthetic event-like object that includes the form as target
+                this.handleOnboarding({ preventDefault: () => {}, target: form });
+            }
+            return;
+        }
+        this.onboardStep += 1;
+        this.showOnboardStep(this.onboardStep);
+    }
+
+    onboardPrev() {
+        if (this.onboardStep <= 1) return;
+        this.onboardStep -= 1;
+        this.showOnboardStep(this.onboardStep);
+    }
+
+    /* Autosave for onboarding/profile (debounced) */
+    scheduleAutosave() {
+        clearTimeout(this.autosaveTimer);
+        this.autosaveTimer = setTimeout(() => this.autosaveProfile(), 900);
+    }
+
+    async autosaveProfile() {
+        const form = document.getElementById('kiq-onboarding-form');
+        if (!form) return;
+        const formData = new FormData(form);
+        // Build payload to exactly match REST handler expectations
+        const householdSizeRaw = formData.get('household_size');
+        const household_size = householdSizeRaw ? parseInt(householdSizeRaw, 10) : 2;
+
+        const dietary_restrictions = formData.getAll('dietary_restrictions') || [];
+        const appliances = formData.getAll('appliances') || [];
+
+        const cooking_skill = formData.get('cooking_skill') || 'intermediate';
+        const budget_level = formData.get('budget_level') || 'moderate';
+        const time_per_meal = formData.get('time_per_meal') || 'moderate';
+
+        const dislikesRaw = formData.get('dislikes') || '';
+        const dislikes = dislikesRaw.split(',').map(d => d.trim()).filter(Boolean);
+
+        const profile = {
+            household_size: household_size,
+            dietary_restrictions: dietary_restrictions,
+            cooking_skill: cooking_skill,
+            budget_level: budget_level,
+            time_per_meal: time_per_meal,
+            dislikes: dislikes,
+            appliances: appliances,
+            members: [],
+        };
+
+        // Collect members from DOM
+        const members = [];
+        document.querySelectorAll('#kiq-members-container .kiq-member').forEach((mEl) => {
+            const name = mEl.querySelector('.member-name')?.value || '';
+            const appetite = parseInt(mEl.querySelector('.member-appetite')?.value || '3', 10);
+            const age = parseInt(mEl.querySelector('.member-age')?.value || '') || null;
+            const allergies = (mEl.querySelector('.member-allergies')?.value || '').split(',').map(s => s.trim()).filter(Boolean);
+            const intolerances = (mEl.querySelector('.member-intolerances')?.value || '').split(',').map(s => s.trim()).filter(Boolean);
+            const mdislikes = (mEl.querySelector('.member-dislikes')?.value || '').split(',').map(s => s.trim()).filter(Boolean);
+            members.push({ name, appetite, age, allergies, intolerances, dislikes: mdislikes });
+        });
+
+        if (members.length) profile.members = members;
+
+        try {
+            const response = await fetch(`${this.apiRoot}kitcheniq/v1/profile`, {
+                method: 'POST',
+                headers: { 'X-WP-Nonce': this.nonce, 'Content-Type': 'application/json' },
+                body: JSON.stringify(profile),
+            });
+            if (response.ok) {
+                this.showSavedIndicator();
+            }
+        } catch (err) {
+            console.error('Autosave failed:', err);
+        }
+    }
+
+    showSavedIndicator() {
+        const el = document.getElementById('kiq-saved-indicator');
+        if (!el) return;
+        el.style.display = 'inline-block';
+        clearTimeout(this._savedTimeout);
+        this._savedTimeout = setTimeout(() => el.style.display = 'none', 1800);
+    }
+
+    /* PWA registration (manifest injection + service worker) */
+    registerPWA() {
+        try {
+            const pluginUrl = (window.kitcheniqData && window.kitcheniqData.pluginUrl) ? window.kitcheniqData.pluginUrl : (typeof kitcheniqData !== 'undefined' ? kitcheniqData.pluginUrl : '');
+            if (!pluginUrl) return;
+
+            // Inject manifest link if not present
+            if (!document.querySelector('link[rel="manifest"]')) {
+                const l = document.createElement('link');
+                l.rel = 'manifest';
+                l.href = pluginUrl + 'manifest.json';
+                document.head.appendChild(l);
+            }
+
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.register(pluginUrl + 'service-worker.js')
+                    .then(reg => console.log('KitchenIQ service worker registered', reg))
+                    .catch(err => console.warn('KitchenIQ SW registration failed', err));
+            }
+        } catch (err) {
+            console.warn('PWA registration error', err);
+        }
+    }
+
+    /* Skeleton helpers */
+    showSkeleton(containerId, count = 3, type = 'card') {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        const html = new Array(count).fill(0).map(() => `<div class="kiq-skeleton" style="height:120px;margin-bottom:12px;"></div>`).join('');
+        container.dataset.prevHtml = container.innerHTML;
+        container.innerHTML = html;
+    }
+
+    hideSkeleton(containerId) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        if (container.dataset.prevHtml !== undefined) {
+            container.innerHTML = container.dataset.prevHtml;
+            delete container.dataset.prevHtml;
         }
     }
 
@@ -129,6 +494,21 @@ class KitchenIQDashboard {
 
         this.currentTab = tabName;
 
+        // reflect in URL (shallow routing)
+        try {
+            const params = new URLSearchParams(window.location.search);
+            params.set('view', tabName);
+            const newUrl = window.location.pathname + '?' + params.toString();
+            history.replaceState({}, '', newUrl);
+        } catch (err) {
+            // ignore
+        }
+
+        // update bottom nav active state if present
+        document.querySelectorAll('.kiq-bottom-btn').forEach(b => b.classList.remove('active'));
+        const bottomBtn = document.querySelector(`.kiq-bottom-btn[data-route="${tabName}"]`);
+        if (bottomBtn) bottomBtn.classList.add('active');
+
         // Load data if needed
         if (tabName === 'dashboard') {
             this.loadInventory();
@@ -141,15 +521,29 @@ class KitchenIQDashboard {
         const form = e.target;
         const formData = new FormData(form);
         
+        // Build profile payload similar to autosave
+        const household_size = parseInt(formData.get('household_size')) || 2;
         const profile = {
-            household_size: parseInt(formData.get('household_size')),
+            household_size: household_size,
             dietary_restrictions: formData.getAll('dietary_restrictions'),
             cooking_skill: formData.get('cooking_skill'),
             budget_level: formData.get('budget_level'),
             time_per_meal: formData.get('time_per_meal'),
-            dislikes: formData.get('dislikes').split(',').map(d => d.trim()),
+            dislikes: (formData.get('dislikes') || '').split(',').map(d => d.trim()).filter(Boolean),
             appliances: formData.getAll('appliances'),
+            members: [],
         };
+
+        // collect members from DOM
+        document.querySelectorAll('#kiq-members-container .kiq-member').forEach((mEl) => {
+            const name = mEl.querySelector('.member-name')?.value || '';
+            const appetite = parseInt(mEl.querySelector('.member-appetite')?.value || '3', 10);
+            const age = parseInt(mEl.querySelector('.member-age')?.value || '') || null;
+            const allergies = (mEl.querySelector('.member-allergies')?.value || '').split(',').map(s => s.trim()).filter(Boolean);
+            const intolerances = (mEl.querySelector('.member-intolerances')?.value || '').split(',').map(s => s.trim()).filter(Boolean);
+            const mdislikes = (mEl.querySelector('.member-dislikes')?.value || '').split(',').map(s => s.trim()).filter(Boolean);
+            profile.members.push({ name, appetite, age, allergies, intolerances, dislikes: mdislikes });
+        });
 
         try {
             const response = await fetch(`${this.apiRoot}kitcheniq/v1/profile`, {
@@ -183,6 +577,7 @@ class KitchenIQDashboard {
     }
 
     async handleImageUpload(e) {
+        this.showSkeleton('kiq-inventory-list', 4, 'inventory');
         const file = e.target.files[0];
         if (!file) return;
 
@@ -224,9 +619,11 @@ class KitchenIQDashboard {
                 
                 if (data.success) {
                     this.inventory = data.inventory;
+                    this.hideSkeleton('kiq-inventory-list');
                     this.renderInventory();
                     this.showNotification(`Added ${data.items_added} items from image`, 'success');
                 } else {
+                    this.hideSkeleton('kiq-inventory-list');
                     this.showNotification(data.error || 'Error processing image', 'error');
                 }
 
@@ -243,6 +640,10 @@ class KitchenIQDashboard {
     }
 
     async generateMeals() {
+        return this.generateMealsWithOptions();
+    }
+
+    async generateMealsWithOptions(moreSeed = null) {
         const planTypeSelect = document.getElementById('kiq-plan-type');
         const moodInput = document.getElementById('kiq-mood');
         
@@ -255,13 +656,17 @@ class KitchenIQDashboard {
         btn.disabled = true;
 
         try {
+            this.showSkeleton('kiq-meal-results', 3, 'meals');
+            const body = { plan_type: planType, mood: mood };
+            if (moreSeed) body.more_seed = moreSeed;
+
             const response = await fetch(`${this.apiRoot}kitcheniq/v1/meals`, {
                 method: 'POST',
                 headers: {
                     'X-WP-Nonce': this.nonce,
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ plan_type: planType, mood: mood }),
+                body: JSON.stringify(body),
             });
 
             const data = await response.json();
@@ -278,9 +683,11 @@ class KitchenIQDashboard {
             
             if (data.success || data.meals) {
                 this.mealPlan = data.meal_plan || data;
+                this.hideSkeleton('kiq-meal-results');
                 this.renderMealPlan();
                 this.showNotification('Meals generated!', 'success');
             } else {
+                this.hideSkeleton('kiq-meal-results');
                 this.showNotification(data.error || 'Error generating meals', 'error');
             }
         } catch (error) {
@@ -356,7 +763,10 @@ class KitchenIQDashboard {
                 </div>
 
                 <div class="kiq-meal-actions">
-                    <button onclick="kitcheniq.rateMeal('${meal.meal_name}', ${idx})" class="btn btn-primary">
+                    <button data-meal-index="${idx}" class="btn btn-outline kiq-select-meal">
+                        Select
+                    </button>
+                    <button onclick="kitcheniq.rateMeal('${meal.meal_name}', ${idx})" class="btn btn-primary" style="margin-left:8px;">
                         ⭐ Rate this meal
                     </button>
                 </div>
@@ -373,6 +783,37 @@ class KitchenIQDashboard {
         ` : '';
 
         container.innerHTML = mealsHtml + shoppingHtml;
+
+        // Wire select handlers to update selected ingredients area
+        setTimeout(() => {
+            document.querySelectorAll('.kiq-select-meal').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const idx = parseInt(btn.dataset.mealIndex, 10);
+                    this.showMealIngredients(idx);
+                });
+            });
+        }, 50);
+    }
+
+    showMealIngredients(index) {
+        const sel = (this.mealPlan && this.mealPlan.meals) ? this.mealPlan.meals[index] : null;
+        const container = document.getElementById('kiq-selected-ingredients');
+        if (!container) return;
+        if (!sel) {
+            container.innerHTML = '';
+            return;
+        }
+
+        const ingHtml = (sel.ingredients_used || []).map(i => `<li>${i.ingredient} — ${i.quantity}</li>`).join('');
+        const missHtml = (sel.missing_items || []).map(m => `<li>${m.item} (${m.importance})</li>`).join('');
+
+        container.innerHTML = `
+            <div class="kiq-selected-meal">
+                <h4>Ingredients for: ${sel.meal_name}</h4>
+                <ul>${ingHtml || '<li>No ingredients listed</li>'}</ul>
+                ${missHtml ? `<h5>Missing items</h5><ul>${missHtml}</ul>` : ''}
+            </div>
+        `;
     }
 
     async rateMeal(mealName, index) {

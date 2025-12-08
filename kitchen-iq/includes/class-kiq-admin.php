@@ -456,6 +456,19 @@ class KIQ_Admin {
                     Clear All History
                 </button>
             </form>
+
+            <h2><?php esc_html_e( 'Test Account Plan (Current User)', 'kitchen-iq' ); ?></h2>
+            <p class="description">Set your current user plan to test tiered behavior (affects limits/features).</p>
+            <form method="post">
+                <?php wp_nonce_field( 'kiq_set_plan' ); ?>
+                <?php $current_plan = KIQ_Data::get_user_plan( get_current_user_id() ); ?>
+                <select name="kiq_plan">
+                    <option value="free" <?php selected( $current_plan, 'free' ); ?>>Free</option>
+                    <option value="basic" <?php selected( $current_plan, 'basic' ); ?>>Basic</option>
+                    <option value="pro" <?php selected( $current_plan, 'pro' ); ?>>Pro (unlimited)</option>
+                </select>
+                <button type="submit" name="kiq_set_plan" class="button button-primary" style="margin-left:8px;">Set Plan</button>
+            </form>
         </div>
         <?php
 
@@ -471,6 +484,15 @@ class KIQ_Admin {
             global $wpdb;
             $wpdb->query( "TRUNCATE TABLE {$wpdb->prefix}kiq_meal_history" );
             echo '<div class="notice notice-success"><p>Meal history cleared.</p></div>';
+        }
+
+        // Handle set plan action
+        if ( isset( $_POST['kiq_set_plan'] ) ) {
+            check_admin_referer( 'kiq_set_plan' );
+            $plan = sanitize_text_field( $_POST['kiq_plan'] ?? 'free' );
+            $user_id = get_current_user_id();
+            KIQ_Data::set_user_plan( $user_id, $plan );
+            echo '<div class="notice notice-success"><p>Plan updated to ' . esc_html( $plan ) . ' for current user.</p></div>';
         }
     }
 
@@ -672,5 +694,3 @@ class KIQ_Admin {
     }
 }
 
-// Initialize admin
-KIQ_Admin::init();

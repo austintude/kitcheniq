@@ -17,7 +17,7 @@ class KIQ_AI {
     /**
      * Generate meal plan using OpenAI
      */
-    public static function generate_meal_plan( $user_id, $profile, $inventory, $plan_type = 'balanced', $mood = null ) {
+    public static function generate_meal_plan( $user_id, $profile, $inventory, $plan_type = 'balanced', $mood = null, $options = array() ) {
         if ( ! KIQ_API_KEY || empty( KIQ_API_KEY ) ) {
             error_log( 'KitchenIQ: OpenAI API key not configured. Set KIQ_API_KEY environment variable or configure in WordPress admin (KitchenIQ → API Key).' );
             return new WP_Error( 'missing_api_key', 'OpenAI API key not configured. Please contact your site administrator.' );
@@ -36,7 +36,7 @@ class KIQ_AI {
         // Assemble prompt based on tier
         $system_prompt = KIQ_Features::get_meal_prompt_for_tier( $user_id );
         
-        $user_message = self::build_meal_request_message( $profile, $inventory, $plan_type, $mood, $user_id );
+        $user_message = self::build_meal_request_message( $profile, $inventory, $plan_type, $mood, $user_id, $options );
 
         $payload = array(
             'model'       => get_option( 'kiq_ai_text_model', 'gpt-4o-mini' ),
@@ -329,12 +329,18 @@ class KIQ_AI {
     /**
      * Build user message for meal request
      */
-    private static function build_meal_request_message( $profile, $inventory, $plan_type, $mood, $user_id ) {
+    private static function build_meal_request_message( $profile, $inventory, $plan_type, $mood, $user_id, $options = array() ) {
         $inventory_text = self::format_inventory_for_prompt( $inventory );
         
         // Get user's meal preferences if they exist
         $preferences = KIQ_Data::get_meal_preferences( $user_id );
         $prefs_text  = self::format_preferences_for_prompt( $preferences );
+
+        // If options include more_seed, ask the model to vary suggestions
+        $more_note = '';
+        if ( isset( $options['more_seed'] ) ) {
+            $more_note = "\n\nNote: The user requested additional alternative ideas (seed: " . esc_html( $options['more_seed'] ) . "). Please vary suggestions accordingly.";
+        }
 
         $message = sprintf(
             "Generate a %s meal plan for a household of %d people.\n\n" .
@@ -343,7 +349,7 @@ class KIQ_AI {
             "Past Meal Preferences:\n%s\n\n" .
             "Plan Type: %s\n" .
             "Mood/Context: %s\n\n" .
-            "Please generate 3 meals for the next day that use the available inventory.",
+            "Please generate 3 meals for the next day that use the available inventory.%s",
             esc_html( $plan_type ),
             intval( $profile['household_size'] ?? 2 ),
             wp_json_encode( $profile, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ),
@@ -352,6 +358,23 @@ class KIQ_AI {
             esc_html( $plan_type ),
             $mood ? esc_html( $mood ) : 'no specific mood'
         );
+
+        // Append more_note if present
+        if ( $more_note ) {
+            $message .= $more_note;
+        }
+
+        // Ask the model to scale ingredient quantities to match the household members.
+        // We expect the profile to include a 'members' array where each member may have an 'appetite' value 1-5.
+        // Tell the model:
+        // - Treat appetite=3 as baseline (average). Use each member's appetite to weight portion sizes.
+        // - Provide ingredient quantities for the whole household (not per-person), scaled to members' appetites.
+        // - If possible, include a per-person breakdown or multiplier used for each ingredient.
+        $scaling_instructions = "\n\nImportant: When listing ingredient quantities, scale amounts to feed the full household provided in the profile. " .
+                                "Each member may include an 'appetite' value from 1 (small) to 5 (large); treat 3 as average. Use these appetite values to weight portion sizes and output quantities for the entire household. " .
+                                "If practical, include a short per-person breakdown or the multiplier used for scaling.\n";
+
+        $message .= $scaling_instructions;
 
         return $message;
     }

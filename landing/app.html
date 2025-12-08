@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KitchenIQ App | Plan Meals</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="page-app">
+  <header class="site-header">
+    <div class="container flex-between">
+      <div class="brand">
+        <span class="brand-mark">KIQ</span>
+        <span class="brand-name">KitchenIQ</span>
+      </div>
+      <nav class="nav">
+        <a href="index.html" class="nav-link">Back to landing</a>
+      </nav>
+      <div class="cta-group">
+        <a class="btn solid" href="#start">Start planning</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="app-main">
+    <section class="app-hero" id="start">
+      <div class="container app-grid">
+        <div>
+          <p class="eyebrow">Live preview</p>
+          <h1>KitchenIQ dashboard</h1>
+          <p class="lede">Add your pantry, set your household, and generate meal plans in seconds.</p>
+          <div class="cta-group">
+            <a class="btn solid" href="#dashboard">Open dashboard</a>
+            <a class="btn ghost" href="#how">See steps</a>
+          </div>
+        </div>
+        <div class="app-panel">
+          <div class="app-card">
+            <div class="app-card-header">Quick start</div>
+            <ol class="app-steps">
+              <li>Scan pantry or upload a photo</li>
+              <li>Add household preferences</li>
+              <li>Generate meals and shopping list</li>
+            </ol>
+            <a class="btn solid full" href="#dashboard">Launch dashboard</a>
+          </div>
+          <div class="app-card ghost">
+            <div class="app-card-header">Usage</div>
+            <div class="usage-row">
+              <span>Meals remaining</span>
+              <strong>4 / 5</strong>
+            </div>
+            <div class="usage-row">
+              <span>Vision scans</span>
+              <strong>3 / 4</strong>
+            </div>
+            <div class="usage-row">
+              <span>Plan tier</span>
+              <strong>Basic</strong>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="app-dashboard" id="dashboard">
+      <div class="container">
+        <div class="section-header">
+          <p class="eyebrow">Interactive</p>
+          <h2>Dashboard embed preview</h2>
+        </div>
+        <div class="iframe-shell">
+          <div class="iframe-toolbar">
+            <div class="dots"><span></span><span></span><span></span></div>
+            <div class="toolbar-actions">
+              <span class="pill pill-ghost">Demo mode</span>
+              <a class="link" href="#how">How to use</a>
+            </div>
+          </div>
+          <div class="iframe-body">
+            <div class="grid two">
+              <div class="card">
+                <div class="card-header">Pantry</div>
+                <ul class="list">
+                  <li><span>Black beans</span><small>2 cans</small></li>
+                  <li><span>Chicken thighs</span><small>1.2 lb</small></li>
+                  <li><span>Baby spinach</span><small>Fresh - nearing</small></li>
+                  <li><span>Tortillas</span><small>8 count</small></li>
+                </ul>
+                <button class="btn ghost full">Scan pantry</button>
+              </div>
+              <div class="card">
+                <div class="card-header">Meal plan</div>
+                <div class="meal">
+                  <div>
+                    <div class="meal-title">One-Pot Creamy Orzo</div>
+                    <div class="meal-meta">Uses spinach, parmesan, broth</div>
+                  </div>
+                  <span class="pill">25 mins</span>
+                </div>
+                <div class="meal">
+                  <div>
+                    <div class="meal-title">Sheet Pan Fajitas</div>
+                    <div class="meal-meta">Uses chicken, tortillas, peppers</div>
+                  </div>
+                  <span class="pill">30 mins</span>
+                </div>
+                <div class="meal">
+                  <div>
+                    <div class="meal-title">Chickpea Coconut Curry</div>
+                    <div class="meal-meta">Uses coconut milk, chickpeas</div>
+                  </div>
+                  <span class="pill">30 mins</span>
+                </div>
+                <button class="btn solid full">Generate meals</button>
+              </div>
+            </div>
+            <div class="card wide">
+              <div class="card-header">Shopping list</div>
+              <div class="chips">
+                <span class="pill">Limes (3)</span>
+                <span class="pill">Red onion (2)</span>
+                <span class="pill">Greek yogurt</span>
+                <span class="pill">Garlic</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section steps" id="how">
+      <div class="container">
+        <div class="section-header">
+          <p class="eyebrow">Workflow</p>
+          <h2>Three steps to consistent dinners.</h2>
+        </div>
+        <div class="steps-grid">
+          <div class="step-card">
+            <div class="step-number">1</div>
+            <h3>Capture inventory</h3>
+            <p>Use camera scans or quick add to inventory items with perishability and quantities.</p>
+          </div>
+          <div class="step-card">
+            <div class="step-number">2</div>
+            <h3>Dial in preferences</h3>
+            <p>Allergies, dislikes, time per meal, budget, and household appetites feed the planner.</p>
+          </div>
+          <div class="step-card">
+            <div class="step-number">3</div>
+            <h3>Generate and shop</h3>
+            <p>Get a meal plan plus a concise shopping list with substitutions to avoid new purchases.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-grid">
+      <div>
+        <div class="brand"><span class="brand-mark">KIQ</span><span class="brand-name">KitchenIQ</span></div>
+        <p class="footer-copy">Ready to plan? Jump back to the landing page to pick a plan.</p>
+      </div>
+      <div class="footer-links">
+        <a href="index.html">Landing</a>
+        <a href="#dashboard">Dashboard</a>
+        <a href="#how">How it works</a>
+      </div>
+      <div class="footer-cta">
+        <a class="btn solid" href="index.html#pricing">See pricing</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>
