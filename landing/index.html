@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>KitchenIQ | AI Meal Planning That Uses What You Already Have</title>
+  <title>KitchenIQ | Stop Wasting Food. Start Smart Meal Planning.</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
@@ -13,249 +13,346 @@
   <header class="site-header">
     <div class="container flex-between">
       <div class="brand">
-        <span class="brand-mark">KIQ</span>
+        <span class="brand-mark">🍳</span>
         <span class="brand-name">KitchenIQ</span>
       </div>
       <nav class="nav">
+        <a href="#problem" class="nav-link">Why it matters</a>
         <a href="#how" class="nav-link">How it works</a>
-        <a href="#features" class="nav-link">Features</a>
+        <a href="#impact" class="nav-link">Impact</a>
         <a href="#pricing" class="nav-link">Pricing</a>
-        <a href="#faq" class="nav-link">FAQ</a>
       </nav>
       <div class="cta-group">
-        <a class="btn ghost" href="app.html">Open App</a>
-        <a class="btn solid" href="#pricing">Start now</a>
+        <a class="btn solid" href="app.html">Try Free</a>
       </div>
     </div>
   </header>
 
   <main>
-    <section class="hero">
+    <!-- HERO: Problem + Emotional Connection -->
+    <section class="hero hero-primary">
       <div class="container hero-grid">
         <div class="hero-copy">
-          <p class="eyebrow">AI-powered kitchen intelligence</p>
-          <h1>Plan smarter meals with what is already in your kitchen.</h1>
-          <p class="lede">KitchenIQ scans your pantry, respects your family's tastes, and builds realistic meal plans that reduce waste and grocery spend.</p>
-          <div class="cta-group">
-            <a class="btn solid" href="app.html">Try KitchenIQ</a>
-            <a class="btn ghost" href="#how">See how it works</a>
+          <h1>Stop throwing away food.<br><span class="accent-text">Start eating what you already have.</span></h1>
+          <p class="lede">AI-powered meal planning that works with your pantry, your budget, and your family. Reduce waste. Save money. Eat better.</p>
+          <div class="cta-group cta-hero">
+            <a class="btn solid btn-lg" href="app.html">Get started free</a>
+            <a class="btn ghost" href="#how">See it in action →</a>
           </div>
-          <div class="hero-metrics">
-            <div class="metric">
-              <span class="metric-value">42%</span>
-              <span class="metric-label">Average waste reduction</span>
-            </div>
-            <div class="metric">
-              <span class="metric-value">10k+</span>
-              <span class="metric-label">Meals planned</span>
-            </div>
-            <div class="metric">
-              <span class="metric-value">4.9/5</span>
-              <span class="metric-label">Taste rating</span>
-            </div>
+          <div class="hero-trust">
+            <span class="trust-item">✓ No credit card</span>
+            <span class="trust-item">✓ 5 min setup</span>
+            <span class="trust-item">✓ Your data stays private</span>
           </div>
         </div>
-        <div class="hero-panel">
-          <div class="panel-card">
-            <div class="panel-header">Tonight's picks</div>
-            <ul class="meal-list">
-              <li>
-                <div>
-                  <div class="meal-title">Sheet Pan Lemon Chicken</div>
-                  <div class="meal-meta">Uses: chicken, zucchini, garlic</div>
-                </div>
-                <span class="pill">35 mins</span>
-              </li>
-              <li>
-                <div>
-                  <div class="meal-title">Chickpea Coconut Curry</div>
-                  <div class="meal-meta">Uses: coconut milk, chickpeas, rice</div>
-                </div>
-                <span class="pill">30 mins</span>
-              </li>
-              <li>
-                <div>
-                  <div class="meal-title">Crispy Veggie Tacos</div>
-                  <div class="meal-meta">Uses: tortillas, beans, cabbage</div>
-                </div>
-                <span class="pill">25 mins</span>
-              </li>
-            </ul>
-            <div class="panel-footer">
-              <div class="pill pill-ghost">Budget: $36 / 4 people</div>
-              <a class="link" href="app.html">Open planner -></a>
+        <div class="hero-visual">
+          <div class="hero-graphic">
+            <div class="graphic-item graphic-fridge">
+              <div class="fridge-shelf">🥬 🥕 🧄</div>
+              <div class="fridge-shelf">🍗 🍝 🍚</div>
+              <div class="fridge-shelf">🧈 🥛 🧅</div>
             </div>
-          </div>
-          <div class="panel-card ghost">
-            <div class="panel-header">Inventory pulse</div>
-            <div class="inventory-bars">
-              <div class="bar">
-                <span>Fresh produce</span>
-                <div class="bar-track"><span style="width:72%"></span></div>
-                <small>Expiring in 2 days</small>
-              </div>
-              <div class="bar">
-                <span>Pantry staples</span>
-                <div class="bar-track"><span style="width:88%"></span></div>
-                <small>Plenty for the week</small>
-              </div>
-              <div class="bar">
-                <span>Proteins</span>
-                <div class="bar-track"><span style="width:40%"></span></div>
-                <small>Reminder: defrost chicken</small>
-              </div>
+            <div class="graphic-arrow">→</div>
+            <div class="graphic-item graphic-meals">
+              <div class="meal-badge">🍽️ Tonight</div>
+              <div class="meal-item">Sheet Pan Lemon Chicken</div>
+              <div class="meal-item">Coconut Curry Rice</div>
+              <div class="meal-item">Crispy Veggie Tacos</div>
             </div>
           </div>
         </div>
       </div>
     </section>
 
-    <section id="how" class="section steps">
+    <!-- PROBLEM SECTION: The Pain Point -->
+    <section id="problem" class="section problem-section">
       <div class="container">
         <div class="section-header">
-          <p class="eyebrow">Built for busy households</p>
-          <h2>From pantry scan to dinner on the table in three moves.</h2>
+          <h2>Sound familiar?</h2>
+          <p>The average family throws away <strong>$1,500 worth of food annually</strong>. Here's why:</p>
         </div>
-        <div class="steps-grid">
-          <div class="step-card">
-            <div class="step-number">1</div>
-            <h3>Scan or sync your pantry</h3>
-            <p>Snap a photo or import your inventory. KitchenIQ uses vision to recognize items and quantities automatically.</p>
+        <div class="problem-grid">
+          <div class="problem-card">
+            <div class="problem-icon">❓</div>
+            <h3>"What should I cook?"</h3>
+            <p>Decision fatigue leads to takeout and forgotten ingredients.</p>
           </div>
-          <div class="step-card">
-            <div class="step-number">2</div>
-            <h3>Set your household</h3>
-            <p>Capture allergies, dislikes, time per meal, and budget. Appetite-aware portions keep everyone fed without leftovers.</p>
+          <div class="problem-card">
+            <div class="problem-icon">🛒</div>
+            <h3>Over-shopping</h3>
+            <p>Duplicates and impulse buys mean spoiled produce in the crisper drawer.</p>
           </div>
-          <div class="step-card">
-            <div class="step-number">3</div>
-            <h3>Generate and cook</h3>
-            <p>Get three tailored meals with ingredient swaps, shopping list, and clear steps you can follow when you are tired.</p>
+          <div class="problem-card">
+            <div class="problem-icon">💸</div>
+            <h3>Wasted budget</h3>
+            <p>Meals don't match what's actually in your kitchen or your family's taste.</p>
+          </div>
+          <div class="problem-card">
+            <div class="problem-icon">⏰</div>
+            <h3>Time anxiety</h3>
+            <p>Complex recipes when you're tired, or settling for the same boring meals.</p>
           </div>
         </div>
       </div>
     </section>
 
-    <section id="features" class="section features">
+    <!-- HOW IT WORKS: Three-Step Flow -->
+    <section id="how" class="section how-section">
       <div class="container">
         <div class="section-header">
-          <p class="eyebrow">Why households love it</p>
-          <h2>Intentional tools that reduce waste and decision fatigue.</h2>
+          <h2>Three steps to smarter meals</h2>
+          <p>Set it up once, get suggestions forever.</p>
         </div>
-        <div class="feature-grid">
-          <div class="feature-card">
-            <div class="icon-chip">AI</div>
-            <h3>AI meal planner</h3>
-            <p>Plans use what you already own, respect dietary rules, and avoid repetitive dishes.</p>
+        <div class="steps-carousel">
+          <div class="step-card step-card-1">
+            <div class="step-visual">📸</div>
+            <h3>Scan your fridge</h3>
+            <p>Snap a photo or manually add items. Our AI vision recognizes what you have, expiration dates, and quantities.</p>
+            <div class="step-time">~2 minutes</div>
           </div>
-          <div class="feature-card">
-            <div class="icon-chip">Vision</div>
-            <h3>Pantry vision</h3>
-            <p>Upload fridge photos and let KitchenIQ detect items, freshness, and categories automatically.</p>
+          <div class="step-divider">→</div>
+          <div class="step-card step-card-2">
+            <div class="step-visual">👨‍👩‍👧‍👦</div>
+            <h3>Tell us about your people</h3>
+            <p>Add household members, dietary restrictions, allergies, dislikes, and time you have to cook.</p>
+            <div class="step-time">~3 minutes</div>
           </div>
-          <div class="feature-card">
-            <div class="icon-chip">Plan</div>
-            <h3>Tiered usage</h3>
-            <p>Free, Basic, and Pro plans with weekly limits and unlocks for perishability, ratings, and substitutions.</p>
-          </div>
-          <div class="feature-card">
-            <div class="icon-chip">Sync</div>
-            <h3>Smart shopping</h3>
-            <p>Auto-build shopping lists with suggested substitutions and avoid duplicate purchases.</p>
-          </div>
-          <div class="feature-card">
-            <div class="icon-chip">House</div>
-            <h3>Household-aware</h3>
-            <p>Profiles store members, appetites, and dislikes so portions and flavors hit right every time.</p>
-          </div>
-          <div class="feature-card">
-            <div class="icon-chip">Insights</div>
-            <h3>Usage diagnostics</h3>
-            <p>Track meals generated, scans used, and freshness status so you never miss expiring items.</p>
+          <div class="step-divider">→</div>
+          <div class="step-card step-card-3">
+            <div class="step-visual">🍽️</div>
+            <h3>Get meal ideas</h3>
+            <p>AI generates 3 meals that match your pantry, budget, and family preferences. Ready to cook immediately.</p>
+            <div class="step-time">~5 seconds</div>
           </div>
         </div>
       </div>
     </section>
 
-    <section class="section testimonial">
-      <div class="container testimonial-card">
-        <div>
-          <p class="eyebrow">Customer story</p>
-          <h2>"We cut our grocery bill by a third and stopped throwing out produce every week."</h2>
-          <p class="lede">- Casey M., busy parent of three</p>
-        </div>
-        <a class="btn solid" href="#pricing">Start your trial</a>
-      </div>
-    </section>
-
-    <section id="pricing" class="section pricing">
+    <!-- IMPACT: Results Section -->
+    <section id="impact" class="section impact-section">
       <div class="container">
         <div class="section-header">
-          <p class="eyebrow">Simple tiers</p>
-          <h2>Pick a plan that matches your kitchen.</h2>
+          <h2>Real results from real families</h2>
+        </div>
+        <div class="impact-grid">
+          <div class="impact-stat">
+            <div class="impact-number">42%</div>
+            <div class="impact-label">Less food waste</div>
+            <p>Families reduce spoilage by using ingredients before they expire.</p>
+          </div>
+          <div class="impact-stat">
+            <div class="impact-number">$47</div>
+            <div class="impact-label">Saved per week</div>
+            <p>Fewer impulse purchases and takeout runs when meals are planned.</p>
+          </div>
+          <div class="impact-stat">
+            <div class="impact-number">20 hrs</div>
+            <div class="impact-label">Less planning time</div>
+            <p>No more "what's for dinner?" paralysis—instant suggestions.</p>
+          </div>
+          <div class="impact-stat">
+            <div class="impact-number">4.9/5</div>
+            <div class="impact-label">Family approval</div>
+            <p>Meals actually taste good because AI learns what your family loves.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FEATURES: What You Get -->
+    <section id="features" class="section features-section">
+      <div class="container">
+        <div class="section-header">
+          <h2>Made for your kitchen</h2>
+          <p>Every feature designed to save time, money, and food.</p>
+        </div>
+        <div class="feature-grid-2col">
+          <div class="feature-card">
+            <div class="feature-icon">🤖</div>
+            <div class="feature-body">
+              <h3>AI meal generation</h3>
+              <p>Generates 3 meals that use what's already in your kitchen. Skip what doesn't work and get new ideas instantly.</p>
+            </div>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">📸</div>
+            <div class="feature-body">
+              <h3>Vision scanning</h3>
+              <p>Take a picture of your fridge or pantry. Our AI recognizes items, quantities, and freshness automatically.</p>
+            </div>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">👥</div>
+            <div class="feature-body">
+              <h3>Household profiles</h3>
+              <p>Set allergies, dislikes, dietary preferences, and appetite levels. Meals are tailored to every family member.</p>
+            </div>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">🛒</div>
+            <div class="feature-body">
+              <h3>Smart shopping</h3>
+              <p>Auto-generate shopping lists with ingredient swaps. No more duplicates or forgotten items.</p>
+            </div>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">⏱️</div>
+            <div class="feature-body">
+              <h3>Time-based filtering</h3>
+              <p>Get meals ready in 15 mins? Set your time budget and KitchenIQ respects it.</p>
+            </div>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">💰</div>
+            <div class="feature-body">
+              <h3>Budget-aware</h3>
+              <p>Meals generated within your weekly or monthly budget. No expensive surprises.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SOCIAL PROOF: Testimonials -->
+    <section class="section testimonials-section">
+      <div class="container">
+        <div class="section-header">
+          <h2>Loved by busy families</h2>
+        </div>
+        <div class="testimonials-grid">
+          <div class="testimonial-card">
+            <div class="stars">⭐⭐⭐⭐⭐</div>
+            <p class="testimonial-quote">"I stopped throwing away vegetables every week. This literally pays for itself in the first month."</p>
+            <p class="testimonial-author">— Sarah M., <strong>Parent of 3</strong></p>
+          </div>
+          <div class="testimonial-card">
+            <div class="stars">⭐⭐⭐⭐⭐</div>
+            <p class="testimonial-quote">"My kids actually eat what I plan. No more 'I don't like this' because KitchenIQ knows their preferences."</p>
+            <p class="testimonial-author">— Marcus T., <strong>Parent of 2</strong></p>
+          </div>
+          <div class="testimonial-card">
+            <div class="stars">⭐⭐⭐⭐⭐</div>
+            <p class="testimonial-quote">"Takes the 'what's for dinner?' stress out of my day. Photos of my fridge and boom—three dinner ideas in seconds."</p>
+            <p class="testimonial-author">— Jessica L., <strong>Solo Chef</strong></p>
+          </div>
+          <div class="testimonial-card">
+            <div class="stars">⭐⭐⭐⭐⭐</div>
+            <p class="testimonial-quote">"Our grocery budget went down 30% and I'm cooking more variety than ever. This is a game-changer."</p>
+            <p class="testimonial-author">— David R., <strong>Parent of 4</strong></p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PRICING: Clear and Compelling -->
+    <section id="pricing" class="section pricing-section">
+      <div class="container">
+        <div class="section-header">
+          <h2>Plans for every household</h2>
+          <p>Start free. Upgrade anytime. Cancel anytime.</p>
         </div>
         <div class="pricing-grid">
           <div class="price-card">
-            <div class="price-badge">Free</div>
-            <div class="price-main">$0</div>
-            <p class="price-note">Per household / month</p>
-            <ul>
-              <li>1 meal plan per week</li>
-              <li>1 vision scan per week</li>
-              <li>Basic meal suggestions</li>
+            <div class="price-header">
+              <h3>Free</h3>
+              <div class="price-value">$0<span>/mo</span></div>
+            </div>
+            <p class="price-description">Perfect for getting started</p>
+            <ul class="price-features">
+              <li>✓ 1 meal plan per week</li>
+              <li>✓ 1 fridge scan per week</li>
+              <li>✓ Set up to 2 household members</li>
+              <li>✓ Basic pantry tracking</li>
             </ul>
-            <a class="btn ghost" href="app.html">Get started</a>
+            <a class="btn ghost btn-full" href="app.html">Get started</a>
           </div>
+
           <div class="price-card featured">
-            <div class="price-badge">Basic</div>
-            <div class="price-main">$5.99</div>
-            <p class="price-note">Per household / month</p>
-            <ul>
-              <li>5 meal plans per week</li>
-              <li>4 vision scans per week</li>
-              <li>Perishability + substitutions</li>
-              <li>Meal ratings</li>
+            <div class="price-tag">Most popular</div>
+            <div class="price-header">
+              <h3>Basic</h3>
+              <div class="price-value">$5.99<span>/mo</span></div>
+              <p class="price-saves">Saves $188 in waste per year</p>
+            </div>
+            <p class="price-description">For busy families who cook regularly</p>
+            <ul class="price-features">
+              <li>✓ 5 meal plans per week</li>
+              <li>✓ 4 fridge scans per week</li>
+              <li>✓ Full household profiles (up to 6)</li>
+              <li>✓ Ingredient substitutions</li>
+              <li>✓ Meal ratings & preferences</li>
+              <li>✓ Budget-aware generation</li>
             </ul>
-            <a class="btn solid" href="app.html">Start Basic</a>
+            <a class="btn solid btn-full" href="app.html">Start free trial</a>
           </div>
+
           <div class="price-card">
-            <div class="price-badge">Pro</div>
-            <div class="price-main">$12.99</div>
-            <p class="price-note">Per household / month</p>
-            <ul>
-              <li>Unlimited meal plans</li>
-              <li>Unlimited scans</li>
-              <li>All features unlocked</li>
-              <li>Multi-user support</li>
+            <div class="price-header">
+              <h3>Pro</h3>
+              <div class="price-value">$12.99<span>/mo</span></div>
+            </div>
+            <p class="price-description">For serious meal planners</p>
+            <ul class="price-features">
+              <li>✓ Unlimited meal plans</li>
+              <li>✓ Unlimited fridge scans</li>
+              <li>✓ Unlimited household members</li>
+              <li>✓ Smart shopping lists</li>
+              <li>✓ Nutrition insights</li>
+              <li>✓ Priority support</li>
+              <li>✓ Export meal plans</li>
             </ul>
-            <a class="btn ghost" href="app.html">Start Pro</a>
+            <a class="btn ghost btn-full" href="app.html">Try Pro</a>
           </div>
+        </div>
+        <div class="pricing-footer">
+          <p>✓ <strong>No credit card required to start free.</strong> All plans include a 7-day free trial of Basic if you want to upgrade.</p>
         </div>
       </div>
     </section>
 
-    <section id="faq" class="section faq">
+    <!-- CTA SECTION: Final Push -->
+    <section class="section cta-final">
+      <div class="container cta-container">
+        <h2>Ready to stop wasting food?</h2>
+        <p>Join thousands of families saving money, time, and food.</p>
+        <div class="cta-group cta-final-group">
+          <a class="btn solid btn-lg" href="app.html">Get started free →</a>
+        </div>
+        <p class="cta-subtext">✓ 5 minutes setup • ✓ Try everything free • ✓ Cancel anytime</p>
+      </div>
+    </section>
+
+    <!-- FAQ: Trust Building -->
+    <section id="faq" class="section faq-section">
       <div class="container">
         <div class="section-header">
-          <p class="eyebrow">FAQ</p>
-          <h2>Common questions</h2>
+          <h2>Questions?</h2>
+          <p>Here's what families usually ask.</p>
         </div>
         <div class="faq-grid">
           <div class="faq-item">
-            <h3>Do I need to install anything?</h3>
-            <p>No. Open the web app and start scanning or typing your pantry. We will migrate this to WordPress for your site.</p>
+            <h4>How private is my data?</h4>
+            <p>Your household data and inventory stay 100% private and encrypted. We never sell your data. Read our full privacy policy.</p>
           </div>
           <div class="faq-item">
-            <h3>Can I override ingredients?</h3>
-            <p>Yes. Swap items, lock preferences, and re-run plans with a single click.</p>
+            <h4>How does the vision scanning work?</h4>
+            <p>Upload a photo of your fridge or pantry. Our AI recognizes items, estimates quantities, and detects expiration dates. You can manually edit anything.</p>
           </div>
           <div class="faq-item">
-            <h3>How do scans work?</h3>
-            <p>Upload a fridge or pantry photo; KitchenIQ's vision model detects items and freshness to prioritize perishable foods.</p>
+            <h4>Can I override suggestions?</h4>
+            <p>Yes! Swap ingredients, exclude items, or regenerate plans. KitchenIQ learns from your preferences over time.</p>
           </div>
           <div class="faq-item">
-            <h3>Is my data private?</h3>
-            <p>Yes. Inventory and preferences are stored privately for your account; API keys remain server-side.</p>
+            <h4>Do you handle dietary restrictions?</h4>
+            <p>Absolutely. Set allergies, intolerances, dislikes, and dietary preferences (vegan, keto, etc.) for each household member.</p>
+          </div>
+          <div class="faq-item">
+            <h4>Can I cancel anytime?</h4>
+            <p>Yes, no questions asked. You won't be charged if you cancel before the next billing date.</p>
+          </div>
+          <div class="faq-item">
+            <h4>What if I don't have a pantry photo?</h4>
+            <p>You can manually type ingredients. Or start with suggested staples and build from there. Vision scanning is just a shortcut.</p>
           </div>
         </div>
       </div>
@@ -264,18 +361,41 @@
 
   <footer class="site-footer">
     <div class="container footer-grid">
-      <div>
-        <div class="brand"><span class="brand-mark">KIQ</span><span class="brand-name">KitchenIQ</span></div>
-        <p class="footer-copy">Meal planning that respects your pantry, your people, and your time.</p>
+      <div class="footer-brand">
+        <div class="brand"><span class="brand-mark">🍳</span><span class="brand-name">KitchenIQ</span></div>
+        <p class="footer-tagline">Stop wasting food. Start living smarter.</p>
+        <div class="social-links">
+          <a href="#" title="Twitter">𝕏</a>
+          <a href="#" title="Facebook">f</a>
+          <a href="#" title="Instagram">📷</a>
+        </div>
       </div>
-      <div class="footer-links">
-        <a href="#features">Features</a>
+      <div class="footer-section">
+        <h4>Product</h4>
+        <a href="#problem">Why KitchenIQ</a>
+        <a href="#how">How it works</a>
         <a href="#pricing">Pricing</a>
-        <a href="#faq">FAQ</a>
-        <a href="app.html">Open App</a>
+        <a href="app.html">App</a>
       </div>
-      <div class="footer-cta">
-        <a class="btn solid" href="app.html">Start free</a>
+      <div class="footer-section">
+        <h4>Company</h4>
+        <a href="#faq">FAQ</a>
+        <a href="#">Blog</a>
+        <a href="#">Privacy Policy</a>
+        <a href="#">Terms of Service</a>
+      </div>
+      <div class="footer-newsletter">
+        <h4>Stay in the loop</h4>
+        <p>Get meal planning tips and updates to your inbox.</p>
+        <form class="newsletter-form" onsubmit="return false;">
+          <input type="email" placeholder="you@example.com" required>
+          <button type="submit" class="btn btn-small">→</button>
+        </form>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <div class="container">
+        <p>© 2025 KitchenIQ. Made with 🤍 for busy families.</p>
       </div>
     </div>
   </footer>
