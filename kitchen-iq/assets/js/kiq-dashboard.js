@@ -405,6 +405,13 @@ class KitchenIQDashboard {
         if (stepEl) stepEl.classList.remove('hidden');
         document.getElementById('kiq-step-prev').classList.toggle('hidden', n === 1);
         document.getElementById('kiq-step-next').textContent = n >= document.querySelectorAll('.onboard-step').length ? 'Save' : 'Next →';
+
+        const bar = document.querySelector('.kiq-stepper-bar');
+        if (bar) {
+            const total = document.querySelectorAll('.onboard-step').length || 1;
+            const pct = Math.min(100, Math.max(0, (n / total) * 100));
+            bar.style.width = `${pct}%`;
+        }
     }
 
     onboardNext() {
@@ -978,10 +985,10 @@ class KitchenIQDashboard {
 
                 <div class="kiq-meal-actions">
                     <button data-meal-index="${idx}" class="btn btn-primary kiq-select-meal">
-                        ✓ Select This Meal
+                        Select this meal
                     </button>
                     <button onclick="kitcheniq.rateMeal('${meal.meal_name}', ${idx})" class="btn btn-secondary" style="margin-left:8px;">
-                        ⭐ Rate
+                        Rate
                     </button>
                 </div>
 
@@ -1034,7 +1041,7 @@ class KitchenIQDashboard {
             return;
         }
 
-        const ingHtml = (sel.ingredients_used || []).map(i => `<li>${i.ingredient} — ${i.quantity}</li>`).join('');
+        const ingHtml = (sel.ingredients_used || []).map(i => `<li>${i.ingredient} - ${i.quantity}</li>`).join('');
         const missHtml = (sel.missing_items || []).map(m => `<li>${m.item} (${m.importance})</li>`).join('');
 
         container.innerHTML = `
