@@ -95,6 +95,11 @@ class KitchenIQDashboard {
                 // update sidebar active state (showTab will handle top/bottom states)
                 document.querySelectorAll('.kiq-side-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
+
+                // if small screen and sidebar is open, close it to reveal content
+                if (window.innerWidth <= 768) {
+                    this.closeSidebar();
+                }
             });
         });
 
@@ -228,6 +233,14 @@ class KitchenIQDashboard {
         const menuToggle = document.getElementById('kiq-menu-toggle');
         if (menuToggle) {
             menuToggle.addEventListener('click', () => {
+                // On small screens, toggle an app-level class that shows the off-canvas sidebar.
+                if (document.body.classList.contains('kiq-sidebar-open')) {
+                    this.closeSidebar();
+                } else {
+                    this.openSidebar();
+                }
+
+                // Also toggle the top nav for slightly larger small screens where top nav is visible
                 const topNav = document.getElementById('kiq-top-nav');
                 if (topNav) topNav.classList.toggle('hidden');
             });
@@ -277,14 +290,12 @@ class KitchenIQDashboard {
             const ageInput = document.createElement('input');
             ageInput.className = 'member-age';
             ageInput.placeholder = 'age';
-            ageInput.style.width = '60px';
             ageInput.value = member.age || '';
 
             const removeBtn = document.createElement('button');
             removeBtn.type = 'button';
             removeBtn.className = 'btn btn-outline kiq-remove-member';
             removeBtn.textContent = 'Remove';
-            removeBtn.style.marginLeft = '8px';
 
             row.appendChild(nameInput);
             row.appendChild(appetiteLabel);
@@ -358,14 +369,14 @@ class KitchenIQDashboard {
                             <option value="4">4</option>
                             <option value="5">5</option>
                         </select>
-                        <input class="member-age" placeholder="age" style="width:60px;" />
+                        <input class="member-age" placeholder="age" />
                     </div>
                     <div style="display:flex;gap:8px;margin-bottom:10px;">
                         <input class="member-allergies" placeholder="Allergies (comma separated)" style="flex:1;" />
                         <input class="member-intolerances" placeholder="Intolerances (comma)" style="flex:1;" />
                     </div>
                     <div style="margin-bottom:12px;">
-                        <input class="member-dislikes" placeholder="Dislikes (comma separated)" style="width:100%;" />
+                        <input class="member-dislikes" placeholder="Dislikes (comma separated)" />
                     </div>
                 `;
                 el.querySelectorAll('input, select').forEach(inp => {
@@ -501,6 +512,120 @@ class KitchenIQDashboard {
             }
         } catch (err) {
             // ignore
+        }
+    }
+
+    // Open the sidebar overlay and trap focus
+    openSidebar() {
+        if (document.body.classList.contains('kiq-sidebar-open')) return;
+
+        // remember previous active element to restore focus on close
+        this._prevActiveElement = document.activeElement;
+
+        document.body.classList.add('kiq-sidebar-open');
+
+        // insert overlay element if not present
+        let overlay = document.querySelector('.kiq-sidebar-overlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.className = 'kiq-sidebar-overlay';
+            document.body.appendChild(overlay);
+        }
+
+        // aria-hide the main content regions so screen readers ignore them
+        const main = document.querySelector('.kiq-main');
+        const bottom = document.querySelector('.kiq-bottom-nav');
+        const topNav = document.getElementById('kiq-top-nav');
+        if (main) main.setAttribute('aria-hidden', 'true');
+        if (bottom) bottom.setAttribute('aria-hidden', 'true');
+        if (topNav) topNav.setAttribute('aria-hidden', 'true');
+
+        // focus the first focusable element inside the sidebar
+        const sidebar = document.querySelector('.kiq-sidebar');
+        if (sidebar) {
+            const focusable = this._getFocusable(sidebar);
+            if (focusable.length) {
+                focusable[0].focus();
+            } else {
+                sidebar.setAttribute('tabindex', '-1');
+                sidebar.focus();
+            }
+        }
+
+        // click on overlay should close
+        overlay.addEventListener('click', this._overlayClickHandler = (e) => {
+            this.closeSidebar();
+        });
+
+        // keydown handler for Escape and focus trapping
+        this._sidebarKeydownHandler = (ev) => {
+            if (ev.key === 'Escape') {
+                ev.preventDefault();
+                this.closeSidebar();
+                return;
+            }
+            if (ev.key === 'Tab') {
+                // focus trap
+                const side = document.querySelector('.kiq-sidebar');
+                const focusable = this._getFocusable(side);
+                if (!focusable.length) return;
+                const first = focusable[0];
+                const last = focusable[focusable.length - 1];
+                if (ev.shiftKey && document.activeElement === first) {
+                    ev.preventDefault();
+                    last.focus();
+                } else if (!ev.shiftKey && document.activeElement === last) {
+                    ev.preventDefault();
+                    first.focus();
+                }
+            }
+        };
+        document.addEventListener('keydown', this._sidebarKeydownHandler);
+    }
+
+    // Close the sidebar and cleanup
+    closeSidebar() {
+        if (!document.body.classList.contains('kiq-sidebar-open')) return;
+
+        document.body.classList.remove('kiq-sidebar-open');
+
+        // remove aria-hidden from main regions
+        const main = document.querySelector('.kiq-main');
+        const bottom = document.querySelector('.kiq-bottom-nav');
+        const topNav = document.getElementById('kiq-top-nav');
+        if (main) main.removeAttribute('aria-hidden');
+        if (bottom) bottom.removeAttribute('aria-hidden');
+        if (topNav) topNav.removeAttribute('aria-hidden');
+
+        // remove overlay click listener and element
+        const overlay = document.querySelector('.kiq-sidebar-overlay');
+        if (overlay) {
+            overlay.removeEventListener('click', this._overlayClickHandler);
+            // optionally remove from DOM
+            overlay.parentNode && overlay.parentNode.removeChild(overlay);
+        }
+
+        // remove keydown listener
+        if (this._sidebarKeydownHandler) {
+            document.removeEventListener('keydown', this._sidebarKeydownHandler);
+            this._sidebarKeydownHandler = null;
+        }
+
+        // restore focus to previously active element
+        if (this._prevActiveElement && typeof this._prevActiveElement.focus === 'function') {
+            this._prevActiveElement.focus();
+        }
+        this._prevActiveElement = null;
+    }
+
+    // Utility: return focusable elements inside container
+    _getFocusable(container) {
+        if (!container) return [];
+        try {
+            return Array.from(container.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'))
+                .filter(el => el.offsetParent !== null); // visible
+        } catch (e) {
+            return [];
         }
     }
 
@@ -816,7 +941,10 @@ class KitchenIQDashboard {
 
         const mealsHtml = meals.map((meal, idx) => `
             <div class="kiq-meal-card">
-                <h3>${meal.meal_name}</h3>
+                <div class="kiq-meal-header">
+                    <h3>${meal.meal_name}</h3>
+                </div>
+                
                 <div class="kiq-meal-meta">
                     <span class="kiq-meal-type">${meal.meal_type}</span>
                     <span class="kiq-cooking-time">${meal.cooking_time_mins || '?'} mins</span>
@@ -844,36 +972,52 @@ class KitchenIQDashboard {
                 ` : ''}
 
                 <div class="kiq-instructions">
+                    <h4>Instructions:</h4>
                     <p>${meal.instructions}</p>
                 </div>
 
                 <div class="kiq-meal-actions">
-                    <button data-meal-index="${idx}" class="btn btn-outline kiq-select-meal">
-                        Select
+                    <button data-meal-index="${idx}" class="btn btn-primary kiq-select-meal">
+                        ✓ Select This Meal
                     </button>
-                    <button onclick="kitcheniq.rateMeal('${meal.meal_name}', ${idx})" class="btn btn-primary" style="margin-left:8px;">
-                        ⭐ Rate this meal
+                    <button onclick="kitcheniq.rateMeal('${meal.meal_name}', ${idx})" class="btn btn-secondary" style="margin-left:8px;">
+                        ⭐ Rate
                     </button>
+                </div>
+
+                <!-- Shopping list appears after selection -->
+                <div class="kiq-meal-shopping" style="display:none;">
+                    <hr style="margin: 16px 0; border: none; border-top: 1px solid #e0e0e0;" />
+                    <div class="kiq-shopping-list-inline">
+                        <h4>Items to Consider Buying:</h4>
+                        <p style="color: #666; font-size: 12px; margin: 0 0 12px 0; font-style: italic;">
+                            Based on common pantry items. Scan your pantry for a personalized list.
+                        </p>
+                        ${!this.inventory || this.inventory.length === 0 ? `
+                            <p style="color: #d97706; font-size: 13px; margin: 0 0 12px 0; background-color: #fef3c7; border-left: 3px solid #f59e0b; padding: 10px 12px; border-radius: 4px;">
+                                💡 <strong>Scan your pantry</strong> to see what you already have and get accurate shopping recommendations.
+                            </p>
+                        ` : ''}
+                        <ul>
+                            ${meal.missing_items?.length ? meal.missing_items.map(item => `<li>${item.item}</li>`).join('') : '<li><em>No specific items flagged as missing for this meal</em></li>'}
+                        </ul>
+                    </div>
                 </div>
             </div>
         `).join('');
 
-        const shoppingHtml = shopping.missing_items?.length ? `
-            <div class="kiq-shopping-list">
-                <h3>Shopping List</h3>
-                <ul>
-                    ${shopping.missing_items.map(item => `<li>${item}</li>`).join('')}
-                </ul>
-            </div>
-        ` : '';
+        container.innerHTML = mealsHtml;
 
-        container.innerHTML = mealsHtml + shoppingHtml;
-
-        // Wire select handlers to update selected ingredients area
+        // Wire select handlers to show shopping list and update selected ingredients area
         setTimeout(() => {
             document.querySelectorAll('.kiq-select-meal').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     const idx = parseInt(btn.dataset.mealIndex, 10);
+                    const card = btn.closest('.kiq-meal-card');
+                    const shoppingDiv = card?.querySelector('.kiq-meal-shopping');
+                    if (shoppingDiv) {
+                        shoppingDiv.style.display = shoppingDiv.style.display === 'none' ? 'block' : 'none';
+                    }
                     this.showMealIngredients(idx);
                 });
             });
