@@ -349,7 +349,7 @@ class KIQ_AI {
             "Past Meal Preferences:\n%s\n\n" .
             "Plan Type: %s\n" .
             "Mood/Context: %s\n\n" .
-            "Please generate 3 meals for the next day that use the available inventory.%s",
+            "Please generate 3 meals for the next day that use the available inventory.",
             esc_html( $plan_type ),
             intval( $profile['household_size'] ?? 2 ),
             wp_json_encode( $profile, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ),
