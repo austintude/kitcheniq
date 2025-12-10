@@ -76,8 +76,32 @@ class KitchenIQDashboard {
             });
             const data = await response.json();
             this.inventory = data.inventory || [];
+            this.renderInventory();
         } catch (error) {
             console.error('Failed to load inventory:', error);
+        }
+    }
+
+    async saveInventory({ silent = false } = {}) {
+        try {
+            const response = await fetch(`${this.apiRoot}kitcheniq/v1/inventory`, {
+                method: 'POST',
+                headers: {
+                    'X-WP-Nonce': this.nonce,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ items: this.inventory || [] }),
+            });
+            const data = await response.json();
+            if (!response.ok || data.error) {
+                throw new Error(data.error || data.message || `Error: ${response.status}`);
+            }
+            this.inventory = data.inventory || this.inventory;
+            if (!silent) this.showNotification('Inventory updated', 'success');
+            this.renderInventory();
+        } catch (err) {
+            console.error('Save inventory error:', err);
+            if (!silent) this.showNotification('Could not update inventory', 'error');
         }
     }
 
@@ -202,6 +226,37 @@ class KitchenIQDashboard {
             moreBtn.addEventListener('click', () => {
                 const seed = String(Date.now());
                 this.generateMealsWithOptions(seed);
+            });
+        }
+
+        // Manual inventory form submit
+        const inventoryForm = document.getElementById('kiq-inventory-form');
+        if (inventoryForm) {
+            inventoryForm.addEventListener('submit', (e) => this.addManualInventoryItem(e));
+        }
+
+        // Inventory inline edits/removals (delegated)
+        const inventoryList = document.getElementById('kiq-inventory-list');
+        if (inventoryList) {
+            inventoryList.addEventListener('click', (e) => {
+                const removeBtn = e.target.closest('[data-action="remove-item"]');
+                if (removeBtn) {
+                    const idx = parseInt(removeBtn.closest('[data-index]')?.dataset.index || '-1', 10);
+                    if (idx >= 0) this.removeInventoryItem(idx);
+                }
+            });
+
+            inventoryList.addEventListener('change', (e) => {
+                const parent = e.target.closest('[data-index]');
+                if (!parent) return;
+                const idx = parseInt(parent.dataset.index || '-1', 10);
+                if (idx < 0 || !this.inventory || !this.inventory[idx]) return;
+                if (e.target.dataset.action === 'qty') {
+                    const val = parseFloat(e.target.value);
+                    this.updateInventoryItem(idx, { quantity: isNaN(val) ? 0 : val });
+                } else if (e.target.dataset.action === 'status') {
+                    this.updateInventoryItem(idx, { status: e.target.value || 'fresh' });
+                }
             });
         }
 
@@ -727,7 +782,7 @@ class KitchenIQDashboard {
         if (sideBtn) sideBtn.setAttribute('aria-current', 'true');
 
         // Load data if needed
-        if (tabName === 'dashboard') {
+        if (tabName === 'dashboard' || tabName === 'inventory') {
             this.loadInventory();
         }
     }
@@ -921,22 +976,83 @@ class KitchenIQDashboard {
         if (!container) return;
 
         if (!this.inventory || this.inventory.length === 0) {
-            container.innerHTML = '<p>No items in inventory. Try scanning with your camera!</p>';
+            container.innerHTML = `
+                <div class="kiq-empty">
+                    <h3>No items yet</h3>
+                    <p class="kiq-muted">Scan your pantry or add items manually to keep meals accurate.</p>
+                </div>`;
             return;
         }
 
-        const itemsHtml = this.inventory.map(item => `
-            <div class="kiq-inventory-item">
-                <div class="kiq-item-name">${item.name}</div>
-                <div class="kiq-item-details">
-                    <span class="kiq-category">${item.category || 'general'}</span>
-                    <span class="kiq-status ${item.status || 'fresh'}">${item.status || 'Fresh'}</span>
+        const itemsHtml = this.inventory.map((item, idx) => `
+            <div class="kiq-inventory-item" data-index="${idx}">
+                <div class="kiq-item-top">
+                    <div>
+                        <div class="kiq-item-name">${item.name || 'Unnamed item'}</div>
+                        <div class="kiq-item-details">
+                            <span class="kiq-category">${item.category || 'general'}</span>
+                            <span class="kiq-status ${item.status || 'fresh'}">${(item.status || 'fresh')}</span>
+                        </div>
+                        ${item.expiry_estimate ? `<div class="kiq-expiry">Expires: ${item.expiry_estimate}</div>` : ''}
+                    </div>
+                    <div class="kiq-item-actions">
+                        ${item.quantity ? `<span class="kiq-pill-muted">Qty: ${item.quantity}</span>` : ''}
+                        <button type="button" class="kiq-remove-btn" data-action="remove-item" aria-label="Remove ${item.name || 'item'}">Remove</button>
+                    </div>
                 </div>
-                ${item.expiry_estimate ? `<div class="kiq-expiry">Expires: ${item.expiry_estimate}</div>` : ''}
+
+                <div class="kiq-item-edit">
+                    <label>Quantity
+                        <input type="number" min="0" step="0.25" value="${item.quantity ?? 1}" data-action="qty" />
+                    </label>
+                    <label>Status
+                        <select data-action="status">
+                            <option value="fresh" ${item.status === 'fresh' ? 'selected' : ''}>Fresh</option>
+                            <option value="low" ${item.status === 'low' ? 'selected' : ''}>Low</option>
+                            <option value="out" ${item.status === 'out' ? 'selected' : ''}>Out</option>
+                        </select>
+                    </label>
+                </div>
             </div>
         `).join('');
 
         container.innerHTML = itemsHtml;
+    }
+
+    addManualInventoryItem(e) {
+        e.preventDefault();
+        const form = e.target;
+        const name = form.name?.value?.trim();
+        if (!name) {
+            this.showNotification('Please enter an item name', 'error');
+            return;
+        }
+        const quantity = parseFloat(form.quantity?.value || '1') || 1;
+        const category = form.category?.value || 'pantry';
+        const status = form.status?.value || 'fresh';
+
+        if (!this.inventory) this.inventory = [];
+        this.inventory.push({ name, quantity, category, status });
+        this.renderInventory();
+        this.saveInventory({ silent: true });
+        form.reset();
+        const qty = form.querySelector('#kiq-item-quantity');
+        if (qty) qty.value = 1;
+        this.showNotification('Item added to inventory', 'success');
+    }
+
+    updateInventoryItem(index, updates = {}) {
+        if (!this.inventory || !this.inventory[index]) return;
+        this.inventory[index] = { ...this.inventory[index], ...updates };
+        this.saveInventory({ silent: true });
+        this.renderInventory();
+    }
+
+    removeInventoryItem(index) {
+        if (!this.inventory || !this.inventory[index]) return;
+        this.inventory.splice(index, 1);
+        this.saveInventory({ silent: true });
+        this.renderInventory();
     }
 
     renderMealPlan() {

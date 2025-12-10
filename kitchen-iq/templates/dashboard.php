@@ -259,6 +259,47 @@
                         <input type="file" id="kiq-camera-input" accept="image/*" capture="environment" style="display: none;" />
                     </div>
 
+                    <div class="kiq-card-surface kiq-inventory-form">
+                        <div class="kiq-card-header">
+                            <div>
+                                <p class="kiq-eyebrow">Manual update</p>
+                                <h3>Add pantry or fridge item</h3>
+                                <p class="kiq-muted">Keep things accurate by logging items by hand. Great for quick edits after shopping.</p>
+                            </div>
+                        </div>
+                        <form id="kiq-inventory-form" class="kiq-inline-form">
+                            <div class="kiq-form-group">
+                                <label for="kiq-item-name">Item name</label>
+                                <input id="kiq-item-name" name="name" placeholder="e.g. eggs, chicken thighs" required />
+                            </div>
+                            <div class="kiq-form-group">
+                                <label for="kiq-item-quantity">Quantity</label>
+                                <input id="kiq-item-quantity" name="quantity" type="number" min="0" step="0.25" value="1" />
+                            </div>
+                            <div class="kiq-form-group">
+                                <label for="kiq-item-category">Category</label>
+                                <select id="kiq-item-category" name="category">
+                                    <option value="pantry">Pantry</option>
+                                    <option value="fridge">Fridge</option>
+                                    <option value="freezer">Freezer</option>
+                                    <option value="produce">Produce</option>
+                                    <option value="other">Other</option>
+                                </select>
+                            </div>
+                            <div class="kiq-form-group">
+                                <label for="kiq-item-status">Status</label>
+                                <select id="kiq-item-status" name="status">
+                                    <option value="fresh">Fresh</option>
+                                    <option value="low">Low</option>
+                                    <option value="out">Out</option>
+                                </select>
+                            </div>
+                            <div class="kiq-form-actions">
+                                <button type="submit" class="btn btn-primary">Add item</button>
+                            </div>
+                        </form>
+                    </div>
+
                     <div id="kiq-inventory-list" class="kiq-inventory-list">
                         <div class="kiq-empty">
                             <h3>No items yet</h3>
