@@ -990,16 +990,17 @@ class KitchenIQDashboard {
                     <hr style="margin: 16px 0; border: none; border-top: 1px solid #e0e0e0;" />
                     <div class="kiq-shopping-list-inline">
                         <h4>Items to Consider Buying:</h4>
-                        <p style="color: #666; font-size: 12px; margin: 0 0 12px 0; font-style: italic;">
-                            Based on common pantry items. Scan your pantry for a personalized list.
-                        </p>
                         ${!this.inventory || this.inventory.length === 0 ? `
                             <p style="color: #d97706; font-size: 13px; margin: 0 0 12px 0; background-color: #fef3c7; border-left: 3px solid #f59e0b; padding: 10px 12px; border-radius: 4px;">
                                 💡 <strong>Scan your pantry</strong> to see what you already have and get accurate shopping recommendations.
                             </p>
-                        ` : ''}
+                        ` : `
+                            <p style="color: #666; font-size: 12px; margin: 0 0 12px 0; font-style: italic;">
+                                Based on common pantry items.
+                            </p>
+                        `}
                         <ul>
-                            ${meal.missing_items?.length ? meal.missing_items.map(item => `<li>${item.item}</li>`).join('') : '<li><em>No specific items flagged as missing for this meal</em></li>'}
+                            ${meal.missing_items?.length ? meal.missing_items.map(item => `<li>${item.item}</li>`).join('') : '<li class="kiq-no-items"><em>No specific items flagged as missing for this meal</em></li>'}
                         </ul>
                     </div>
                 </div>

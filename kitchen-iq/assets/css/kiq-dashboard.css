@@ -526,6 +526,10 @@
     font-weight: bold;
 }
 
+.kiq-shopping-list-inline li.kiq-no-items::before {
+    content: '';
+}
+
 .kiq-shopping-list-inline p {
     background-color: #fef3c7;
     border-left: 3px solid #f59e0b;
