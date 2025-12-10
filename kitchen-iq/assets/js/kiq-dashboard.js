@@ -43,6 +43,8 @@ class KitchenIQDashboard {
                 if (hs) hs.value = String(this.profile.household_size);
             }
             this.renderMemberInputs();
+            // update profile summary area in settings
+            this.updateProfileSummary();
         } catch (err) {
             // ignore if DOM not ready
         }
@@ -80,20 +82,79 @@ class KitchenIQDashboard {
     }
 
     attachEventListeners() {
-        // Tab switching
-        document.querySelectorAll('[data-tab]').forEach(btn => {
+        // Navigation: make the sidebar the canonical control.
+        // Top tabs and bottom nav will delegate to the sidebar where possible.
+
+        // Sidebar buttons (canonical)
+        document.querySelectorAll('.kiq-side-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
-                this.showTab(btn.dataset.tab);
+                const tab = btn.dataset.tab;
+                if (!tab) return;
+                this.showTab(tab);
+                // update sidebar active state (showTab will handle top/bottom states)
+                document.querySelectorAll('.kiq-side-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
             });
         });
 
-        // Bottom nav (app-like) routing
+        // Accessibility & keyboard nav for sidebar
+        const sideButtons = Array.from(document.querySelectorAll('.kiq-side-btn'));
+        if (sideButtons.length) {
+            sideButtons.forEach((b, idx, arr) => {
+                // ensure focusable and announceable
+                b.setAttribute('tabindex', b.getAttribute('tabindex') || '0');
+                b.setAttribute('role', 'button');
+
+                b.addEventListener('keydown', (ev) => {
+                    const key = ev.key;
+                    if (key === 'ArrowDown' || key === 'ArrowRight') {
+                        ev.preventDefault();
+                        const next = arr[(idx + 1) % arr.length];
+                        next.focus();
+                    } else if (key === 'ArrowUp' || key === 'ArrowLeft') {
+                        ev.preventDefault();
+                        const prev = arr[(idx - 1 + arr.length) % arr.length];
+                        prev.focus();
+                    } else if (key === 'Home') {
+                        ev.preventDefault();
+                        arr[0].focus();
+                    } else if (key === 'End') {
+                        ev.preventDefault();
+                        arr[arr.length - 1].focus();
+                    } else if (key === 'Enter' || key === ' ') {
+                        ev.preventDefault();
+                        b.click();
+                    }
+                });
+            });
+        }
+
+        // Top tabs delegate to sidebar if a matching side button exists, otherwise show directly
+        document.querySelectorAll('[data-tab]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                const tab = btn.dataset.tab;
+                const side = document.querySelector(`.kiq-side-btn[data-tab="${tab}"]`);
+                if (side) {
+                    side.click();
+                } else {
+                    this.showTab(tab);
+                }
+            });
+        });
+
+        // Bottom nav delegate to sidebar if possible
         document.querySelectorAll('.kiq-bottom-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
                 const route = btn.dataset.route;
-                this.showTab(route);
+                const side = document.querySelector(`.kiq-side-btn[data-tab="${route}"]`);
+                if (side) {
+                    side.click();
+                } else {
+                    this.showTab(route);
+                }
                 // update bottom nav active state
                 document.querySelectorAll('.kiq-bottom-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
@@ -427,6 +488,22 @@ class KitchenIQDashboard {
         this._savedTimeout = setTimeout(() => el.style.display = 'none', 1800);
     }
 
+    updateProfileSummary() {
+        try {
+            const profile = this.profile || {};
+            const summary = document.getElementById('kiq-profile-summary');
+            if (summary) {
+                summary.textContent = `${profile.household_size || 2} person household | ${profile.cooking_skill || 'unknown'} cook | ${profile.budget_level || 'moderate'} budget`;
+            }
+            const currentUserEl = document.getElementById('current-user');
+            if (currentUserEl) {
+                currentUserEl.textContent = String(this.currentUser || '');
+            }
+        } catch (err) {
+            // ignore
+        }
+    }
+
     /* PWA registration (manifest injection + service worker) */
     registerPWA() {
         try {
@@ -508,6 +585,14 @@ class KitchenIQDashboard {
         document.querySelectorAll('.kiq-bottom-btn').forEach(b => b.classList.remove('active'));
         const bottomBtn = document.querySelector(`.kiq-bottom-btn[data-route="${tabName}"]`);
         if (bottomBtn) bottomBtn.classList.add('active');
+
+        // update sidebar active state (sidebar is canonical nav)
+        document.querySelectorAll('.kiq-side-btn').forEach(b => b.classList.remove('active'));
+        const sideBtn = document.querySelector(`.kiq-side-btn[data-tab="${tabName}"]`);
+        if (sideBtn) sideBtn.classList.add('active');
+        // aria-current for assistive tech
+        document.querySelectorAll('.kiq-side-btn').forEach(b => b.removeAttribute('aria-current'));
+        if (sideBtn) sideBtn.setAttribute('aria-current', 'true');
 
         // Load data if needed
         if (tabName === 'dashboard') {

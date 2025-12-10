@@ -22,15 +22,74 @@
 .kiq-brand { font-weight: 700; font-size: 18px; color: #111; font-family: var(--kiq-font-sans); }
 .kiq-header-actions { display:flex; gap:10px; align-items:center; }
 
-.kiq-dashboard { max-width: 1200px; margin: 18px auto; padding: 20px; font-family: var(--kiq-font-sans); flex: 1 1 auto; }
+.kiq-dashboard { max-width: 1200px; margin: 18px auto; padding: 0; font-family: var(--kiq-font-sans); flex: 1 1 auto; }
 
 /* Main container */
 .kiq-dashboard {
     max-width: 1200px;
     margin: 0 auto;
-    padding: 20px;
+    padding: 0;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
 }
+
+/* App shell layout: sidebar + main */
+.kiq-shell {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 20px;
+    max-width: 1200px;
+    margin: 18px auto;
+    padding: 20px;
+}
+
+.kiq-sidebar {
+    background: var(--kiq-surface);
+    border-radius: 12px;
+    padding: 18px;
+    box-shadow: var(--kiq-shadow);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 520px;
+}
+
+.kiq-sidebar-brand {
+    font-weight: 800;
+    font-size: 16px;
+    padding: 6px 8px;
+    color: #111;
+}
+
+.kiq-side-nav { display:flex; flex-direction:column; gap:8px; margin-top:8px; }
+.kiq-side-btn { background: transparent; border: none; text-align: left; padding: 10px 12px; border-radius: 8px; cursor: pointer; display:flex; gap:10px; align-items:center; font-weight:600; color:#333; }
+.kiq-side-btn span { opacity:0.9; }
+.kiq-side-btn:hover { background: rgba(46,204,113,0.06); color: var(--kiq-accent-600); }
+.kiq-side-btn.active { background: linear-gradient(90deg, rgba(46,204,113,0.08), rgba(46,204,113,0.04)); color: var(--kiq-accent-600); box-shadow: 0 6px 18px rgba(39,174,96,0.06); }
+
+.kiq-main { background: transparent; padding: 6px 0 80px 0; }
+
+/* Card-style main areas */
+.kiq-card {
+    background: var(--kiq-surface);
+    border: 1px solid #eef2f1;
+    border-radius: 12px;
+    padding: 18px;
+    box-shadow: var(--kiq-shadow);
+}
+
+.kiq-card h2 { margin-top: 0; }
+
+/* Make each content pane feel like a card/section inside main */
+.kiq-main [data-content] {
+    background: var(--kiq-surface);
+    border: 1px solid #eef2f1;
+    border-radius: 12px;
+    padding: 18px;
+    margin-bottom: 18px;
+    box-shadow: var(--kiq-shadow);
+}
+
+.kiq-main [data-content] h2 { margin-top: 0; }
 
 /* Tab navigation */
 .kiq-nav-tabs {

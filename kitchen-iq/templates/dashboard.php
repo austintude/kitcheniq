@@ -21,6 +21,18 @@
     </header>
 
     <main id="kiq-dashboard" class="kiq-dashboard">
+        <div class="kiq-shell">
+            <aside class="kiq-sidebar" aria-label="Primary">
+                <div class="kiq-sidebar-brand">KitchenIQ</div>
+                <nav class="kiq-side-nav">
+                    <button data-tab="onboarding" class="kiq-side-btn">👋<span>Setup</span></button>
+                    <button data-tab="inventory" class="kiq-side-btn">📦<span>Pantry</span></button>
+                    <button data-tab="dashboard" class="kiq-side-btn">🍽️<span>Meals</span></button>
+                    <button data-tab="history" class="kiq-side-btn">📋<span>History</span></button>
+                    <button data-tab="settings" class="kiq-side-btn">⚙️<span>Settings</span></button>
+                </nav>
+            </aside>
+            <section class="kiq-main">
     <!-- Notifications Container -->
     <div id="kiq-notifications" class="kiq-notifications"></div>
 
@@ -267,13 +279,7 @@
 
 </div>
 
-<script>
-    // Profile summary
-    document.addEventListener('DOMContentLoaded', function() {
-        const profile = window.kitcheniq?.profile || {};
-        const summary = document.getElementById('kiq-profile-summary');
-        if (summary && profile) {
-            summary.textContent = `${profile.household_size || 2} person household | ${profile.cooking_skill || 'unknown'} cook | ${profile.budget_level || 'moderate'} budget`;
-        }
-    });
-</script>
+        </section> <!-- .kiq-main -->
+    </div> <!-- .kiq-shell -->
+
+<!-- Inline nav wiring removed; navigation is handled centrally in assets/js/kiq-dashboard.js -->
