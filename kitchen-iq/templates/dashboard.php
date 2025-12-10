@@ -1,4 +1,40 @@
 <div id="kiq-app" class="kiq-app">
+    <svg aria-hidden="true" class="kiq-icon-sprite">
+        <symbol id="kiq-icon-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 9.5 12 3l9 6.5" />
+            <path d="M5 10.5V21h5.5v-5.5h3V21H19V10.5" />
+        </symbol>
+        <symbol id="kiq-icon-box" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 7.5 12 3l9 4.5-9 4.5-9-4.5Z" />
+            <path d="M3 7.5v9l9 4.5 9-4.5v-9" />
+            <path d="M12 12v9" />
+        </symbol>
+        <symbol id="kiq-icon-meal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 14a7 7 0 0 1 14 0" />
+            <path d="M4 14h16" />
+            <path d="M6 18h12" />
+            <path d="M12 7V5" />
+        </symbol>
+        <symbol id="kiq-icon-history" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="7.5" />
+            <path d="M12 8v4l3 2" />
+        </symbol>
+        <symbol id="kiq-icon-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 9.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5Z" />
+            <path d="M4.8 12a7.2 7.2 0 0 1 .1-1.1l-1.7-1.3 1.5-2.6 2 .5a7.2 7.2 0 0 1 1.9-1.1l.3-2.1h3l.3 2.1a7.2 7.2 0 0 1 1.9 1.1l2-.5 1.5 2.6-1.7 1.3a7.2 7.2 0 0 1 0 2.2l1.7 1.3-1.5 2.6-2-.5a7.2 7.2 0 0 1-1.9 1.1l-.3 2.1h-3l-.3-2.1a7.2 7.2 0 0 1-1.9-1.1l-2 .5-1.5-2.6 1.7-1.3a7.2 7.2 0 0 1-.1-1.1Z" />
+        </symbol>
+        <symbol id="kiq-icon-camera" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 7.5h3l1.2-2h5.6l1.2 2H19a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2Z" />
+            <circle cx="12" cy="12" r="3.3" />
+        </symbol>
+        <symbol id="kiq-icon-arrow-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 12h14" />
+            <path d="M13 6l6 6-6 6" />
+        </symbol>
+        <symbol id="kiq-icon-spark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3.5 13.8 8 18.5 9.8 13.8 11.6 12 16.1 10.2 11.6 5.5 9.8 10.2 8Z" />
+        </symbol>
+    </svg>
     <header class="kiq-topbar">
         <div class="kiq-topbar-left">
             <button id="kiq-menu-toggle" class="kiq-icon-btn" aria-label="Toggle menu">
@@ -15,6 +51,7 @@
             </div>
         </div>
         <div class="kiq-topbar-actions">
+            <a href="/" class="kiq-back-link">← Back to site</a>
             <button id="kiq-sync-btn" class="btn btn-ghost">Sync</button>
         </div>
     </header>
@@ -22,24 +59,24 @@
     <nav id="kiq-top-nav" class="kiq-top-nav">
         <div class="kiq-nav-tabs">
             <button data-tab="onboarding" class="active">
-                <span class="kiq-tab-icon" aria-hidden="true">🏠</span>
-                Setup
+                <span class="kiq-tab-icon" aria-hidden="true"><svg class="kiq-icon"><use href="#kiq-icon-home"></use></svg></span>
+                <span class="kiq-tab-label">Setup</span>
             </button>
             <button data-tab="inventory">
-                <span class="kiq-tab-icon" aria-hidden="true">📦</span>
-                Pantry
+                <span class="kiq-tab-icon" aria-hidden="true"><svg class="kiq-icon"><use href="#kiq-icon-box"></use></svg></span>
+                <span class="kiq-tab-label">Pantry</span>
             </button>
             <button data-tab="dashboard">
-                <span class="kiq-tab-icon" aria-hidden="true">🍽️</span>
-                Meals
+                <span class="kiq-tab-icon" aria-hidden="true"><svg class="kiq-icon"><use href="#kiq-icon-meal"></use></svg></span>
+                <span class="kiq-tab-label">Meals</span>
             </button>
             <button data-tab="history">
-                <span class="kiq-tab-icon" aria-hidden="true">🗂️</span>
-                History
+                <span class="kiq-tab-icon" aria-hidden="true"><svg class="kiq-icon"><use href="#kiq-icon-history"></use></svg></span>
+                <span class="kiq-tab-label">History</span>
             </button>
             <button data-tab="settings">
-                <span class="kiq-tab-icon" aria-hidden="true">⚙️</span>
-                Settings
+                <span class="kiq-tab-icon" aria-hidden="true"><svg class="kiq-icon"><use href="#kiq-icon-settings"></use></svg></span>
+                <span class="kiq-tab-label">Settings</span>
             </button>
         </div>
     </nav>
@@ -52,23 +89,23 @@
             </div>
             <nav class="kiq-side-nav">
                 <button data-tab="onboarding" class="kiq-side-btn active">
-                    <span class="kiq-side-dot"></span>
+                    <span class="kiq-side-icon" aria-hidden="true"><svg class="kiq-icon"><use href="#kiq-icon-home"></use></svg></span>
                     <span>Setup</span>
                 </button>
                 <button data-tab="inventory" class="kiq-side-btn">
-                    <span class="kiq-side-dot"></span>
+                    <span class="kiq-side-icon" aria-hidden="true"><svg class="kiq-icon"><use href="#kiq-icon-box"></use></svg></span>
                     <span>Pantry</span>
                 </button>
                 <button data-tab="dashboard" class="kiq-side-btn">
-                    <span class="kiq-side-dot"></span>
+                    <span class="kiq-side-icon" aria-hidden="true"><svg class="kiq-icon"><use href="#kiq-icon-meal"></use></svg></span>
                     <span>Meals</span>
                 </button>
                 <button data-tab="history" class="kiq-side-btn">
-                    <span class="kiq-side-dot"></span>
+                    <span class="kiq-side-icon" aria-hidden="true"><svg class="kiq-icon"><use href="#kiq-icon-history"></use></svg></span>
                     <span>History</span>
                 </button>
                 <button data-tab="settings" class="kiq-side-btn">
-                    <span class="kiq-side-dot"></span>
+                    <span class="kiq-side-icon" aria-hidden="true"><svg class="kiq-icon"><use href="#kiq-icon-settings"></use></svg></span>
                     <span>Settings</span>
                 </button>
             </nav>
@@ -251,9 +288,11 @@
 
                     <div class="kiq-action-bar">
                         <button id="kiq-camera-btn" class="btn btn-primary">
+                            <span class="kiq-btn-icon" aria-hidden="true"><svg class="kiq-icon"><use href="#kiq-icon-camera"></use></svg></span>
                             Scan with camera
                         </button>
                         <button id="kiq-skip-scan-btn" class="btn btn-secondary">
+                            <span class="kiq-btn-icon" aria-hidden="true"><svg class="kiq-icon"><use href="#kiq-icon-arrow-right"></use></svg></span>
                             Skip & go to meals
                         </button>
                         <input type="file" id="kiq-camera-input" accept="image/*" capture="environment" style="display: none;" />
@@ -329,6 +368,7 @@
                                 <h3>Tell us what you’re in the mood for</h3>
                             </div>
                             <button id="kiq-update-pantry-btn" class="btn btn-ghost">
+                                <span class="kiq-btn-icon" aria-hidden="true"><svg class="kiq-icon"><use href="#kiq-icon-box"></use></svg></span>
                                 Update pantry first
                             </button>
                         </div>
@@ -350,9 +390,11 @@
 
                             <div class="kiq-generator-actions">
                                 <button id="kiq-generate-meals-btn" class="btn btn-primary">
+                                    <span class="kiq-btn-icon" aria-hidden="true"><svg class="kiq-icon"><use href="#kiq-icon-spark"></use></svg></span>
                                     Generate meals
                                 </button>
                                 <button id="kiq-more-ideas-btn" class="btn btn-outline">
+                                    <span class="kiq-btn-icon" aria-hidden="true"><svg class="kiq-icon"><use href="#kiq-icon-arrow-right"></use></svg></span>
                                     More ideas
                                 </button>
                             </div>
@@ -431,10 +473,25 @@
     </div>
 
     <nav class="kiq-bottom-nav" aria-label="Main">
-        <button class="kiq-bottom-btn" data-route="inventory">Pantry</button>
-        <button class="kiq-bottom-btn active" data-route="onboarding">Setup</button>
-        <button class="kiq-bottom-btn" data-route="dashboard">Meals</button>
-        <button class="kiq-bottom-btn" data-route="history">History</button>
-        <button class="kiq-bottom-btn" data-route="settings">Settings</button>
+        <button class="kiq-bottom-btn" data-route="inventory">
+            <svg class="kiq-icon" aria-hidden="true"><use href="#kiq-icon-box"></use></svg>
+            <span>Pantry</span>
+        </button>
+        <button class="kiq-bottom-btn active" data-route="onboarding">
+            <svg class="kiq-icon" aria-hidden="true"><use href="#kiq-icon-home"></use></svg>
+            <span>Setup</span>
+        </button>
+        <button class="kiq-bottom-btn" data-route="dashboard">
+            <svg class="kiq-icon" aria-hidden="true"><use href="#kiq-icon-meal"></use></svg>
+            <span>Meals</span>
+        </button>
+        <button class="kiq-bottom-btn" data-route="history">
+            <svg class="kiq-icon" aria-hidden="true"><use href="#kiq-icon-history"></use></svg>
+            <span>History</span>
+        </button>
+        <button class="kiq-bottom-btn" data-route="settings">
+            <svg class="kiq-icon" aria-hidden="true"><use href="#kiq-icon-settings"></use></svg>
+            <span>Settings</span>
+        </button>
     </nav>
 </div>

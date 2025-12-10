@@ -38,9 +38,8 @@ class KitchenIQDashboard {
 
         // If we have a loaded profile, prefill household size and render members
         try {
-            if (this.profile && this.profile.household_size) {
-                const hs = document.getElementById('household_size');
-                if (hs) hs.value = String(this.profile.household_size);
+            if (this.profile && Object.keys(this.profile).length > 0) {
+                this.populateFormFromProfile();
             }
             this.renderMemberInputs();
             // update profile summary area in settings
@@ -62,6 +61,10 @@ class KitchenIQDashboard {
             });
             const data = await response.json();
             this.profile = data.profile || {};
+                    // If profile loaded successfully, populate form fields
+                    if (Object.keys(this.profile).length > 0) {
+                        setTimeout(() => this.populateFormFromProfile(), 100);
+                    }
         } catch (error) {
             console.error('Failed to load profile:', error);
         }
@@ -321,14 +324,35 @@ class KitchenIQDashboard {
             el.className = 'kiq-member';
             el.dataset.index = i;
 
-            // Name / appetite / age row
-            const row = document.createElement('div');
-            row.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:6px;';
+            // Header with name and remove button
+            const header = document.createElement('div');
+            header.className = 'kiq-member-header';
 
             const nameInput = document.createElement('input');
             nameInput.className = 'member-name';
             nameInput.placeholder = `Member ${idx} name`;
             nameInput.value = member.name || '';
+            nameInput.style.border = 'none';
+            nameInput.style.background = 'transparent';
+            nameInput.style.flex = '1';
+
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.className = 'kiq-remove-member';
+            removeBtn.textContent = '−';
+            removeBtn.setAttribute('aria-label', 'Remove member');
+            removeBtn.title = 'Remove member';
+
+            header.appendChild(nameInput);
+            header.appendChild(removeBtn);
+
+            // Body with details
+            const body = document.createElement('div');
+            body.className = 'kiq-member-body';
+
+            // Appetite and age row
+            const row1 = document.createElement('div');
+            row1.style.cssText = 'display:flex;gap:8px;align-items:center;';
 
             const appetiteLabel = document.createElement('label');
             appetiteLabel.style.fontSize = '12px';
@@ -336,6 +360,9 @@ class KitchenIQDashboard {
 
             const appetiteSelect = document.createElement('select');
             appetiteSelect.className = 'member-appetite';
+            appetiteSelect.style.border = '1px solid var(--kiq-border)';
+            appetiteSelect.style.borderRadius = '8px';
+            appetiteSelect.style.padding = '6px 8px';
             [1,2,3,4,5].forEach(v => {
                 const opt = document.createElement('option'); opt.value = String(v); opt.textContent = String(v);
                 appetiteSelect.appendChild(opt);
@@ -344,45 +371,57 @@ class KitchenIQDashboard {
 
             const ageInput = document.createElement('input');
             ageInput.className = 'member-age';
-            ageInput.placeholder = 'age';
+            ageInput.placeholder = 'Age';
             ageInput.value = member.age || '';
+            ageInput.style.maxWidth = '80px';
+            ageInput.style.border = '1px solid var(--kiq-border)';
+            ageInput.style.borderRadius = '8px';
+            ageInput.style.padding = '6px 8px';
 
-            const removeBtn = document.createElement('button');
-            removeBtn.type = 'button';
-            removeBtn.className = 'btn btn-outline kiq-remove-member';
-            removeBtn.textContent = 'Remove';
+            row1.appendChild(appetiteLabel);
+            row1.appendChild(appetiteSelect);
+            row1.appendChild(ageInput);
 
-            row.appendChild(nameInput);
-            row.appendChild(appetiteLabel);
-            row.appendChild(appetiteSelect);
-            row.appendChild(ageInput);
-            row.appendChild(removeBtn);
-
-            // Allergies/intolerances row
+            // Allergies row
             const row2 = document.createElement('div');
-            row2.style.cssText = 'display:flex;gap:8px;margin-bottom:10px;';
             const allergiesInput = document.createElement('input');
             allergiesInput.className = 'member-allergies';
             allergiesInput.placeholder = 'Allergies (comma separated)';
-            allergiesInput.style.flex = '1';
+            allergiesInput.style.width = '100%';
+            allergiesInput.style.border = '1px solid var(--kiq-border)';
+            allergiesInput.style.borderRadius = '8px';
+            allergiesInput.style.padding = '6px 8px';
             allergiesInput.value = (member.allergies||[]).join(', ');
+            row2.appendChild(allergiesInput);
+
+            // Intolerances row
+            const row3 = document.createElement('div');
             const intolerancesInput = document.createElement('input');
             intolerancesInput.className = 'member-intolerances';
-            intolerancesInput.placeholder = 'Intolerances (comma)';
-            intolerancesInput.style.flex = '1';
+            intolerancesInput.placeholder = 'Intolerances (comma separated)';
+            intolerancesInput.style.width = '100%';
+            intolerancesInput.style.border = '1px solid var(--kiq-border)';
+            intolerancesInput.style.borderRadius = '8px';
+            intolerancesInput.style.padding = '6px 8px';
             intolerancesInput.value = (member.intolerances||[]).join(', ');
-            row2.appendChild(allergiesInput);
-            row2.appendChild(intolerancesInput);
+            row3.appendChild(intolerancesInput);
 
             // Dislikes row
-            const row3 = document.createElement('div');
-            row3.style.cssText = 'margin-bottom:12px;';
+            const row4 = document.createElement('div');
             const dislikesInput = document.createElement('input');
             dislikesInput.className = 'member-dislikes';
             dislikesInput.placeholder = 'Dislikes (comma separated)';
             dislikesInput.style.width = '100%';
+            dislikesInput.style.border = '1px solid var(--kiq-border)';
+            dislikesInput.style.borderRadius = '8px';
+            dislikesInput.style.padding = '6px 8px';
             dislikesInput.value = (member.dislikes||[]).join(', ');
-            row3.appendChild(dislikesInput);
+            row4.appendChild(dislikesInput);
+
+            body.appendChild(row1);
+            body.appendChild(row2);
+            body.appendChild(row3);
+            body.appendChild(row4);
 
             // wire remove
             removeBtn.addEventListener('click', () => {
@@ -396,9 +435,8 @@ class KitchenIQDashboard {
                 inp.addEventListener('change', () => this.scheduleAutosave());
             });
 
-            el.appendChild(row);
-            el.appendChild(row2);
-            el.appendChild(row3);
+            el.appendChild(header);
+            el.appendChild(body);
 
             container.appendChild(el);
         }
@@ -1055,6 +1093,26 @@ class KitchenIQDashboard {
         this.renderInventory();
     }
 
+    formatInstructions(instructions) {
+        if (!instructions) return [];
+
+        // Prefer explicit line breaks; fallback to sentence splits if needed
+        const lineSplit = instructions
+            .replace(/\r\n/g, '\n')
+            .split(/\n+/)
+            .map(s => s.trim())
+            .filter(Boolean);
+
+        if (lineSplit.length > 1) return lineSplit;
+
+        const sentenceSplit = instructions
+            .split(/(?<=[.!?])\s+(?=[A-Z0-9])/)
+            .map(s => s.trim())
+            .filter(Boolean);
+
+        return sentenceSplit.length ? sentenceSplit : [instructions.trim()];
+    }
+
     renderMealPlan() {
         const container = document.getElementById('kiq-meal-results');
         if (!container || !this.mealPlan) return;
@@ -1069,9 +1127,18 @@ class KitchenIQDashboard {
                 </div>
                 
                 <div class="kiq-meal-meta">
-                    <span class="kiq-meal-type">${meal.meal_type}</span>
-                    <span class="kiq-cooking-time">${meal.cooking_time_mins || '?'} mins</span>
-                    <span class="kiq-difficulty">${meal.difficulty || 'medium'}</span>
+                    <div class="kiq-meta-pill">
+                        <span class="kiq-meta-label">Course</span>
+                        <span class="kiq-meta-value">${meal.meal_type || 'Meal'}</span>
+                    </div>
+                    <div class="kiq-meta-pill">
+                        <span class="kiq-meta-label">Cook time</span>
+                        <span class="kiq-meta-value">${meal.cooking_time_mins || '?'} mins</span>
+                    </div>
+                    <div class="kiq-meta-pill">
+                        <span class="kiq-meta-label">Effort</span>
+                        <span class="kiq-meta-value">${meal.difficulty || 'Medium'}</span>
+                    </div>
                 </div>
                 
                 <div class="kiq-ingredients">
@@ -1096,7 +1163,10 @@ class KitchenIQDashboard {
 
                 <div class="kiq-instructions">
                     <h4>Instructions:</h4>
-                    <p>${meal.instructions}</p>
+                    ${(() => {
+                        const steps = this.formatInstructions(meal.instructions);
+                        return steps.length ? `<ol class="kiq-steps">${steps.map(step => `<li>${step}</li>`).join('')}</ol>` : '<p>No instructions provided.</p>';
+                    })()}
                 </div>
 
                 <div class="kiq-meal-actions">
