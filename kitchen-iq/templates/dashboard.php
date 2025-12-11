@@ -295,7 +295,26 @@
                             <span class="kiq-btn-icon" aria-hidden="true"><svg class="kiq-icon"><use href="#kiq-icon-arrow-right"></use></svg></span>
                             Skip & go to meals
                         </button>
-                        <input type="file" id="kiq-camera-input" accept="image/*" capture="environment" style="display: none;" />
+                        <input type="file" id="kiq-camera-input" accept="image/*" multiple style="display: none;" />
+                    </div>
+
+                    <!-- Multi-photo preview gallery -->
+                    <div id="kiq-photo-preview" class="kiq-photo-preview" style="display: none;">
+                        <div class="kiq-photo-preview-header">
+                            <h4><span id="kiq-photo-count">0</span> photos selected</h4>
+                            <div class="kiq-photo-preview-actions">
+                                <button id="kiq-add-more-photos" class="btn btn-ghost btn-sm">+ Add more</button>
+                                <button id="kiq-clear-photos" class="btn btn-ghost btn-sm">Clear all</button>
+                            </div>
+                        </div>
+                        <div id="kiq-photo-gallery" class="kiq-photo-gallery"></div>
+                        <div class="kiq-photo-submit">
+                            <button id="kiq-scan-all-photos" class="btn btn-primary">
+                                <span class="kiq-btn-icon" aria-hidden="true"><svg class="kiq-icon"><use href="#kiq-icon-spark"></use></svg></span>
+                                Scan all photos
+                            </button>
+                            <p class="kiq-muted">Tip: Take photos of different shelves, the fridge, freezer, and pantry for best results.</p>
+                        </div>
                     </div>
 
                     <div class="kiq-card-surface kiq-inventory-form">
