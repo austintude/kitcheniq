@@ -117,6 +117,21 @@ class KIQ_REST {
             )
         );
 
+        // Add pantry item via barcode/QR scan lookup
+        register_rest_route(
+            'kitcheniq/v1',
+            '/inventory-code',
+            array(
+                'methods'             => 'POST',
+                'callback'            => array( __CLASS__, 'handle_inventory_code_lookup' ),
+                'permission_callback' => array( __CLASS__, 'check_auth' ),
+                'args'                => array(
+                    'code'     => array( 'type' => 'string', 'required' => true ),
+                    'quantity' => array( 'type' => 'integer', 'default' => 1 ),
+                ),
+            )
+        );
+
         // Get usage stats
         register_rest_route(
             'kitcheniq/v1',
@@ -417,6 +432,46 @@ class KIQ_REST {
     }
 
     /**
+     * Add an inventory item via barcode/QR scan lookup
+     */
+    public static function handle_inventory_code_lookup( $request ) {
+        $user_id = get_current_user_id();
+        $params  = $request->get_json_params();
+
+        $raw_code = $params['code'] ?? '';
+        $code     = self::sanitize_code_input( $raw_code );
+        if ( is_wp_error( $code ) ) {
+            return new WP_REST_Response( array(
+                'error' => $code->get_error_message(),
+            ), 400 );
+        }
+
+        $quantity = max( 1, intval( $params['quantity'] ?? 1 ) );
+
+        $product = self::lookup_product_metadata( $code );
+        if ( is_wp_error( $product ) ) {
+            $status = $product->get_error_code() === 'product_not_found' ? 404 : 400;
+            return new WP_REST_Response( array(
+                'error' => $product->get_error_message(),
+            ), $status );
+        }
+
+        $inventory_item = self::build_inventory_item_from_product( $product, $quantity );
+
+        $inventory   = KIQ_Data::get_inventory( $user_id );
+        $inventory[] = $inventory_item;
+        KIQ_Data::save_inventory( $user_id, $inventory );
+
+        return new WP_REST_Response( array(
+            'success'     => true,
+            'code'        => $code,
+            'product'     => $product,
+            'added_item'  => $inventory_item,
+            'inventory'   => $inventory,
+        ), 200 );
+    }
+
+    /**
      * Handle vision scanning
      */
     public static function handle_inventory_scan( $request ) {
@@ -424,32 +479,94 @@ class KIQ_REST {
 
         $params = $request->get_json_params();
 
-        // Accept either a remote URL or a data URI (base64 image) from the client.
-        $raw_image = isset( $params['image_url'] ) ? $params['image_url'] : '';
+        // Accept a single image_url or a batch of image_urls.
+        $raw_images = array();
+        if ( isset( $params['image_urls'] ) && is_array( $params['image_urls'] ) ) {
+            $raw_images = array_filter( $params['image_urls'] );
+        }
 
-        if ( empty( $raw_image ) ) {
+        if ( ! empty( $params['image_url'] ) ) {
+            $raw_images[] = $params['image_url'];
+        }
+
+        // Accept optional video_url(s) for frame extraction.
+        $video_inputs = array();
+        if ( isset( $params['video_urls'] ) && is_array( $params['video_urls'] ) ) {
+            $video_inputs = array_filter( $params['video_urls'] );
+        }
+
+        if ( ! empty( $params['video_url'] ) ) {
+            $video_inputs[] = $params['video_url'];
+        }
+
+        if ( ! empty( $video_inputs ) && ! self::is_video_scanning_enabled() ) {
             return new WP_REST_Response( array(
-                'error' => 'Missing image_url parameter',
+                'error' => 'Video uploads are not enabled for pantry scans. Please provide still photos instead.',
             ), 400 );
         }
 
-        // If it's a data URI (client sent base64 image), keep it but validate the prefix.
-        if ( strpos( $raw_image, 'data:' ) === 0 ) {
-            if ( preg_match( '#^data:image/(png|jpeg|jpg);base64,#i', $raw_image ) ) {
-                $image_url = $raw_image;
-            } else {
+        if ( empty( $raw_images ) && empty( $video_inputs ) ) {
+            return new WP_REST_Response( array(
+                'error' => 'Missing image_url/image_urls or video_url/video_urls parameter',
+            ), 400 );
+        }
+
+        $remaining_usage     = KIQ_Features::get_remaining_usage( $user_id );
+        $remaining_scans     = intval( $remaining_usage['vision_scans_remaining'] ?? 0 );
+        $max_frames_per_video = 5;
+        $requested_scans      = count( $raw_images ) + ( count( $video_inputs ) * $max_frames_per_video );
+
+        if ( $remaining_scans <= 0 ) {
+            return new WP_REST_Response( array(
+                'error'     => 'Vision scan limit reached',
+                'remaining' => $remaining_usage,
+            ), 429 );
+        }
+
+        if ( $requested_scans > $remaining_scans ) {
+            return new WP_REST_Response( array(
+                'error'     => 'Vision scan limit reached',
+                'remaining' => $remaining_usage,
+            ), 429 );
+        }
+
+        // Expand video inputs into frame data URIs
+        foreach ( $video_inputs as $video_url ) {
+            $sanitized_video = self::sanitize_video_input( $video_url );
+            if ( is_wp_error( $sanitized_video ) ) {
                 return new WP_REST_Response( array(
-                    'error' => 'Unsupported data URI image format',
+                    'error' => $sanitized_video->get_error_message(),
                 ), 400 );
             }
-        } else {
-            // Otherwise treat it as a remote URL and sanitize.
-            $image_url = esc_url_raw( $raw_image );
-            if ( empty( $image_url ) ) {
+
+            $frames = self::extract_frames_from_video( $sanitized_video, $max_frames_per_video );
+            if ( is_wp_error( $frames ) ) {
                 return new WP_REST_Response( array(
-                    'error' => 'Invalid image URL',
+                    'error' => $frames->get_error_message(),
                 ), 400 );
             }
+
+            $raw_images = array_merge( $raw_images, $frames );
+        }
+
+        // Re-evaluate requested scans after frame extraction to be precise
+        $requested_scans = count( $raw_images );
+        if ( $requested_scans > $remaining_scans ) {
+            return new WP_REST_Response( array(
+                'error'     => 'Vision scan limit reached',
+                'remaining' => $remaining_usage,
+            ), 429 );
+        }
+
+        $image_urls = array();
+        foreach ( $raw_images as $raw_image ) {
+            $sanitized = self::sanitize_image_input( $raw_image );
+            if ( is_wp_error( $sanitized ) ) {
+                return new WP_REST_Response( array(
+                    'error' => $sanitized->get_error_message(),
+                ), 400 );
+            }
+            $image_urls[] = $sanitized;
         }
 
         if ( ! KIQ_Features::allows( $user_id, 'vision_scanning' ) ) {
@@ -458,26 +575,30 @@ class KIQ_REST {
             ), 403 );
         }
 
-        if ( ! KIQ_Features::can_scan_pantry( $user_id ) ) {
-            $remaining = KIQ_Features::get_remaining_usage( $user_id );
-            return new WP_REST_Response( array(
-                'error'     => 'Vision scan limit reached',
-                'remaining' => $remaining,
-            ), 429 );
-        }
+        $scan_results   = array();
+        $all_new_items  = array();
 
-        // Call AI vision
-        $extraction = KIQ_AI::extract_pantry_from_image( $user_id, $image_url );
+        foreach ( $image_urls as $image_url ) {
+            $extraction = KIQ_AI::extract_pantry_from_image( $user_id, $image_url );
 
-        if ( is_wp_error( $extraction ) ) {
-            return new WP_REST_Response( array(
-                'error' => $extraction->get_error_message(),
-            ), 500 );
+            if ( is_wp_error( $extraction ) ) {
+                return new WP_REST_Response( array(
+                    'error' => $extraction->get_error_message(),
+                ), 500 );
+            }
+
+            $new_items      = isset( $extraction['items'] ) ? $extraction['items'] : array();
+            $all_new_items  = array_merge( $all_new_items, $new_items );
+            $scan_results[] = array(
+                'source'      => substr( $image_url, 0, 80 ),
+                'items_found' => count( $new_items ),
+                'summary'     => $extraction['summary'] ?? '',
+            );
         }
 
         // Merge with existing inventory
         $existing_inventory = KIQ_Data::get_inventory( $user_id );
-        $new_items          = isset( $extraction['items'] ) ? $extraction['items'] : array();
+        $new_items          = $all_new_items;
 
         // Add ID and timestamp to new items
         foreach ( $new_items as &$item ) {
@@ -494,8 +615,273 @@ class KIQ_REST {
             'items_added'   => count( $new_items ),
             'new_items'     => $new_items,
             'inventory'     => $merged_inventory,
+            'scan_results'  => $scan_results,
             'remaining'     => KIQ_Features::get_remaining_usage( $user_id ),
         ), 200 );
+    }
+
+    /**
+     * Validate and sanitize an image input (data URI or URL)
+     */
+    private static function sanitize_image_input( $raw_image ) {
+        if ( empty( $raw_image ) ) {
+            return new WP_Error( 'invalid_image', 'Missing image data' );
+        }
+
+        if ( strpos( $raw_image, 'data:' ) === 0 ) {
+            if ( preg_match( '#^data:image/(png|jpeg|jpg);base64,#i', $raw_image ) ) {
+                return $raw_image;
+            }
+
+            return new WP_Error( 'invalid_image_format', 'Unsupported data URI image format' );
+        }
+
+        $image_url = esc_url_raw( $raw_image );
+        if ( empty( $image_url ) ) {
+            return new WP_Error( 'invalid_image_url', 'Invalid image URL' );
+        }
+
+        return $image_url;
+    }
+
+    /**
+     * Parse and validate a barcode/QR payload
+     */
+    private static function sanitize_code_input( $raw_code ) {
+        $code = sanitize_text_field( trim( (string) $raw_code ) );
+
+        if ( empty( $code ) ) {
+            return new WP_Error( 'invalid_code', 'Missing barcode or QR code payload' );
+        }
+
+        $parsed = self::extract_barcode_from_payload( $code );
+        if ( ! $parsed ) {
+            return new WP_Error( 'invalid_code', 'Unable to parse barcode/QR payload. Provide a numeric UPC/EAN or a URL containing it.' );
+        }
+
+        return $parsed;
+    }
+
+    /**
+     * Extract numeric code from QR/barcode payload (raw string or URL)
+     */
+    private static function extract_barcode_from_payload( $payload ) {
+        // Direct numeric payload
+        if ( preg_match( '/\b(\d{8,18})\b/', $payload, $matches ) ) {
+            return $matches[1];
+        }
+
+        // If it's a URL, try to grab any numeric segment
+        if ( filter_var( $payload, FILTER_VALIDATE_URL ) ) {
+            $path = parse_url( $payload, PHP_URL_PATH );
+            if ( $path && preg_match( '/(\d{8,18})/', $path, $matches ) ) {
+                return $matches[1];
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Lookup product metadata from OpenFoodFacts using UPC/EAN code
+     */
+    private static function lookup_product_metadata( $code ) {
+        $endpoint = sprintf( 'https://world.openfoodfacts.org/api/v2/product/%s.json', rawurlencode( $code ) );
+
+        $response = wp_remote_get( $endpoint, array( 'timeout' => 15 ) );
+        if ( is_wp_error( $response ) ) {
+            return new WP_Error( 'lookup_failed', 'Unable to reach product lookup service.' );
+        }
+
+        $body_raw  = wp_remote_retrieve_body( $response );
+        $body      = json_decode( $body_raw, true );
+        $http_code = wp_remote_retrieve_response_code( $response );
+
+        if ( empty( $body ) || $http_code >= 500 ) {
+            return new WP_Error( 'lookup_failed', 'Invalid response from product lookup service.' );
+        }
+
+        if ( intval( $body['status'] ?? 0 ) !== 1 ) {
+            return new WP_Error( 'product_not_found', 'No product found for this code.' );
+        }
+
+        $product = $body['product'] ?? array();
+
+        return array(
+            'code'       => $code,
+            'name'       => sanitize_text_field( $product['product_name'] ?? $product['product_name_en'] ?? 'Unknown item' ),
+            'brand'      => sanitize_text_field( $product['brands'] ?? '' ),
+            'quantity'   => sanitize_text_field( $product['quantity'] ?? '' ),
+            'categories' => isset( $product['categories_tags'] ) && is_array( $product['categories_tags'] ) ? $product['categories_tags'] : array(),
+            'image'      => esc_url_raw( $product['image_front_url'] ?? $product['image_url'] ?? '' ),
+            'nutriscore' => sanitize_text_field( $product['nutriscore_grade'] ?? '' ),
+            'url'        => esc_url_raw( $product['url'] ?? '' ),
+        );
+    }
+
+    /**
+     * Build an inventory item structure from lookup metadata
+     */
+    private static function build_inventory_item_from_product( $product, $quantity = 1 ) {
+        $category_from_tag = '';
+
+        if ( ! empty( $product['categories'] ) && is_array( $product['categories'] ) ) {
+            $category_from_tag = self::normalize_category_tag( $product['categories'][0] );
+        }
+
+        $category           = $category_from_tag ? $category_from_tag : 'general';
+        $likely_perishable  = self::is_likely_perishable( $product['categories'] ?? array(), $product['name'] ?? '' );
+        $estimated_days_good = $likely_perishable ? 7 : 60;
+
+        $notes_parts = array( 'Added via code scan' );
+        if ( ! empty( $product['brand'] ) ) {
+            $notes_parts[] = 'Brand: ' . $product['brand'];
+        }
+        $notes_parts[] = 'Code: ' . $product['code'];
+
+        return array(
+            'id'                  => wp_rand( 100000, 999999 ),
+            'added_at'            => current_time( 'mysql' ),
+            'name'                => $product['name'] ?? 'Unknown item',
+            'category'            => $category,
+            'item_count'          => max( 1, intval( $quantity ) ),
+            'quantity_estimate'   => 'full',
+            'package_state'       => 'sealed',
+            'freshness_label'     => 'fresh',
+            'likely_perishable'   => $likely_perishable,
+            'estimated_days_good' => $estimated_days_good,
+            'notes'               => implode( ' | ', array_filter( $notes_parts ) ),
+            'confidence'          => 0.9,
+            'barcode'             => $product['code'],
+            'image_url'           => $product['image'] ?? '',
+        );
+    }
+
+    /**
+     * Normalize category tag from OpenFoodFacts
+     */
+    private static function normalize_category_tag( $tag ) {
+        $tag = preg_replace( '/^en:/', '', (string) $tag );
+        $tag = str_replace( array( '-', '_' ), ' ', $tag );
+        return sanitize_text_field( $tag );
+    }
+
+    /**
+     * Heuristic to decide if product is perishable
+     */
+    private static function is_likely_perishable( $categories, $name ) {
+        $haystack = strtolower( implode( ' ', (array) $categories ) . ' ' . $name );
+        $keywords = array( 'produce', 'vegetable', 'fruit', 'meat', 'seafood', 'fish', 'poultry', 'dairy', 'fresh', 'cheese', 'yogurt' );
+
+        foreach ( $keywords as $keyword ) {
+            if ( strpos( $haystack, $keyword ) !== false ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Validate and sanitize video URL input
+     */
+    private static function sanitize_video_input( $raw_video ) {
+        if ( empty( $raw_video ) ) {
+            return new WP_Error( 'invalid_video', 'Missing video data' );
+        }
+
+        $video_url = esc_url_raw( $raw_video );
+        if ( empty( $video_url ) ) {
+            return new WP_Error( 'invalid_video_url', 'Invalid video URL' );
+        }
+
+        $path = parse_url( $video_url, PHP_URL_PATH );
+        $ext  = $path ? strtolower( pathinfo( $path, PATHINFO_EXTENSION ) ) : '';
+        $allowed = array( 'mp4', 'mov', 'm4v', 'webm' );
+        if ( $ext && ! in_array( $ext, $allowed, true ) ) {
+            return new WP_Error( 'invalid_video_format', 'Unsupported video format. Use mp4, mov, m4v, or webm.' );
+        }
+
+        return $video_url;
+    }
+
+    /**
+     * Extract up to N frames from a video URL as data URIs for vision scanning.
+     * Requires ffmpeg to be installed on the host.
+     */
+    private static function extract_frames_from_video( $video_url, $max_frames = 5 ) {
+        if ( $max_frames < 1 ) {
+            $max_frames = 1;
+        }
+
+        if ( ! self::has_ffmpeg() ) {
+            return new WP_Error( 'ffmpeg_missing', 'Video scanning requires ffmpeg installed on the server. Please upload still photos instead.' );
+        }
+
+        $tmp_file = download_url( $video_url );
+        if ( is_wp_error( $tmp_file ) || empty( $tmp_file ) ) {
+            return new WP_Error( 'video_download_failed', 'Unable to download video for scanning.' );
+        }
+
+        $output_dir = trailingslashit( get_temp_dir() );
+        $output_base = tempnam( $output_dir, 'kiqframe' );
+        if ( file_exists( $output_base ) ) {
+            unlink( $output_base );
+        }
+        $output_pattern = $output_base . '-%02d.jpg';
+
+        $command = sprintf(
+            'ffmpeg -hide_banner -loglevel error -i %s -vf "fps=%d,scale=720:-1" -frames:v %d %s',
+            escapeshellarg( $tmp_file ),
+            max( 1, $max_frames ),
+            intval( $max_frames ),
+            escapeshellarg( $output_pattern )
+        );
+
+        exec( $command, $output_lines, $exit_code );
+
+        $frame_glob = str_replace( '%02d', '*', $output_pattern );
+        $frame_files = glob( $frame_glob );
+
+        if ( $exit_code !== 0 || empty( $frame_files ) ) {
+            @unlink( $tmp_file );
+            return new WP_Error( 'video_frame_extract_failed', 'Unable to extract frames from video for scanning.' );
+        }
+
+        $frames = array();
+        foreach ( $frame_files as $frame_file ) {
+            $data = file_get_contents( $frame_file );
+            if ( $data ) {
+                $frames[] = 'data:image/jpeg;base64,' . base64_encode( $data );
+            }
+            @unlink( $frame_file );
+        }
+
+        @unlink( $tmp_file );
+
+        return $frames;
+    }
+
+    /**
+     * Determine if video scanning is enabled for this site/config.
+     */
+    private static function is_video_scanning_enabled() {
+        $enabled_option = get_option( 'kiq_enable_video_scanning', false );
+        $enabled_env    = getenv( 'KIQ_ENABLE_VIDEO_SCANNING' );
+
+        if ( $enabled_env !== false ) {
+            return filter_var( $enabled_env, FILTER_VALIDATE_BOOLEAN );
+        }
+
+        return (bool) $enabled_option;
+    }
+
+    /**
+     * Check if ffmpeg is installed
+     */
+    private static function has_ffmpeg() {
+        $which = trim( (string) shell_exec( 'command -v ffmpeg' ) );
+        return ! empty( $which );
     }
 
     /**
@@ -533,6 +919,15 @@ class KIQ_REST {
                 'logging_enabled'  => get_option( 'kiq_enable_ai_logging', false ),
             ),
             'openai_test' => KIQ_AI::test_openai_connection(),
+            'video_scanning' => array(
+                'enabled'  => self::is_video_scanning_enabled(),
+                'ffmpeg'   => self::has_ffmpeg(),
+                'note'     => 'Video inputs are converted to still frames; OpenAI API consumes images only.',
+            ),
+            'code_lookup' => array(
+                'provider' => 'OpenFoodFacts',
+                'endpoint' => 'https://world.openfoodfacts.org/api/v2/product/{code}.json',
+            ),
         );
 
         return new WP_REST_Response( $diagnostics, 200 );
