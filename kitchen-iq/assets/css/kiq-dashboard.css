@@ -302,12 +302,12 @@ body:has(.kiq-app) .main-navigation {
 .kiq-form-group textarea {
     border: 1px solid var(--kiq-border);
     border-radius: 12px;
-    padding: 0;
+    padding: 12px;
     font-size: 14px;
     background: #fff;
     transition: border 0.15s ease, box-shadow 0.15s ease;
     font-family: var(--kiq-font-body);
-    line-height: 1.5;
+    line-height: 1.4;
     min-height: 44px;
     max-width: 100%;
     box-sizing: border-box;
@@ -460,7 +460,13 @@ body:has(.kiq-app) .main-navigation {
 }
 .kiq-item-edit label { font-size: 12px; color: var(--kiq-muted); display: flex; flex-direction: column; gap: 6px; }
 .kiq-item-edit input,
-.kiq-item-edit select { padding: 10px 10px; border-radius: 10px; border: 1px solid var(--kiq-border); }
+.kiq-item-edit select {
+    padding: 12px;
+    border-radius: 10px;
+    border: 1px solid var(--kiq-border);
+    line-height: 1.4;
+    width: 100%;
+}
 .kiq-item-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .kiq-pill-muted { background: var(--kiq-surface-subtle); border: 1px solid var(--kiq-border); border-radius: 999px; padding: 6px 10px; font-weight: 600; color: var(--kiq-muted); }
 .kiq-remove-btn {
