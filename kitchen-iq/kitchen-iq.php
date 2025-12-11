@@ -3,7 +3,7 @@
  * Plugin Name: KitchenIQ
  * Plugin URI: https://kitcheniq.ai
  * Description: AI-powered kitchen intelligence system. Scan your pantry, get personalized meal plans, and reduce food waste.
- * Version: 0.2.7
+ * Version: 0.3.3
  * Author: KitchenIQ
  * Author URI: https://kitcheniq.ai
  * License: GPL-2.0+
@@ -23,7 +23,7 @@ if ( ! defined( 'KIQ_PLUGIN_URL' ) ) {
     define( 'KIQ_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 }
 if ( ! defined( 'KIQ_VERSION' ) ) {
-    define( 'KIQ_VERSION', '0.2.7' );
+    define( 'KIQ_VERSION', '0.3.3' );
 }
 
 // API Key configuration - check environment first, then WordPress options
@@ -114,6 +114,9 @@ class KIQ_Main {
         if ( ! is_user_logged_in() ) {
             return '<p>' . esc_html__( 'You must be logged in to use KitchenIQ.', 'kitchen-iq' ) . '</p>';
         }
+
+        // Hide the WordPress admin bar when displaying the dashboard
+        add_filter( 'show_admin_bar', '__return_false' );
 
         // Include the dashboard template so the full HTML is present
         ob_start();

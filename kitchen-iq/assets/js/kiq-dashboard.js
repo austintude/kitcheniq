@@ -38,11 +38,12 @@ class KitchenIQDashboard {
 
         // If we have a loaded profile, prefill household size and render members
         try {
-            if (this.profile && this.profile.household_size) {
-                const hs = document.getElementById('household_size');
-                if (hs) hs.value = String(this.profile.household_size);
+            if (this.profile && Object.keys(this.profile).length > 0) {
+                this.populateFormFromProfile();
             }
             this.renderMemberInputs();
+            // update profile summary area in settings
+            this.updateProfileSummary();
         } catch (err) {
             // ignore if DOM not ready
         }
@@ -60,6 +61,10 @@ class KitchenIQDashboard {
             });
             const data = await response.json();
             this.profile = data.profile || {};
+                    // If profile loaded successfully, populate form fields
+                    if (Object.keys(this.profile).length > 0) {
+                        setTimeout(() => this.populateFormFromProfile(), 100);
+                    }
         } catch (error) {
             console.error('Failed to load profile:', error);
         }
@@ -74,26 +79,114 @@ class KitchenIQDashboard {
             });
             const data = await response.json();
             this.inventory = data.inventory || [];
+            this.renderInventory();
         } catch (error) {
             console.error('Failed to load inventory:', error);
         }
     }
 
+    async saveInventory({ silent = false } = {}) {
+        try {
+            const response = await fetch(`${this.apiRoot}kitcheniq/v1/inventory`, {
+                method: 'POST',
+                headers: {
+                    'X-WP-Nonce': this.nonce,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ items: this.inventory || [] }),
+            });
+            const data = await response.json();
+            if (!response.ok || data.error) {
+                throw new Error(data.error || data.message || `Error: ${response.status}`);
+            }
+            this.inventory = data.inventory || this.inventory;
+            if (!silent) this.showNotification('Inventory updated', 'success');
+            this.renderInventory();
+        } catch (err) {
+            console.error('Save inventory error:', err);
+            if (!silent) this.showNotification('Could not update inventory', 'error');
+        }
+    }
+
     attachEventListeners() {
-        // Tab switching
-        document.querySelectorAll('[data-tab]').forEach(btn => {
+        // Navigation: make the sidebar the canonical control.
+        // Top tabs and bottom nav will delegate to the sidebar where possible.
+
+        // Sidebar buttons (canonical)
+        document.querySelectorAll('.kiq-side-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
-                this.showTab(btn.dataset.tab);
+                const tab = btn.dataset.tab;
+                if (!tab) return;
+                this.showTab(tab);
+                // update sidebar active state (showTab will handle top/bottom states)
+                document.querySelectorAll('.kiq-side-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+
+                // if small screen and sidebar is open, close it to reveal content
+                if (window.innerWidth <= 768) {
+                    this.closeSidebar();
+                }
             });
         });
 
-        // Bottom nav (app-like) routing
+        // Accessibility & keyboard nav for sidebar
+        const sideButtons = Array.from(document.querySelectorAll('.kiq-side-btn'));
+        if (sideButtons.length) {
+            sideButtons.forEach((b, idx, arr) => {
+                // ensure focusable and announceable
+                b.setAttribute('tabindex', b.getAttribute('tabindex') || '0');
+                b.setAttribute('role', 'button');
+
+                b.addEventListener('keydown', (ev) => {
+                    const key = ev.key;
+                    if (key === 'ArrowDown' || key === 'ArrowRight') {
+                        ev.preventDefault();
+                        const next = arr[(idx + 1) % arr.length];
+                        next.focus();
+                    } else if (key === 'ArrowUp' || key === 'ArrowLeft') {
+                        ev.preventDefault();
+                        const prev = arr[(idx - 1 + arr.length) % arr.length];
+                        prev.focus();
+                    } else if (key === 'Home') {
+                        ev.preventDefault();
+                        arr[0].focus();
+                    } else if (key === 'End') {
+                        ev.preventDefault();
+                        arr[arr.length - 1].focus();
+                    } else if (key === 'Enter' || key === ' ') {
+                        ev.preventDefault();
+                        b.click();
+                    }
+                });
+            });
+        }
+
+        // Top tabs delegate to sidebar if a matching side button exists, otherwise show directly
+        document.querySelectorAll('[data-tab]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                const tab = btn.dataset.tab;
+                const side = document.querySelector(`.kiq-side-btn[data-tab="${tab}"]`);
+                if (side) {
+                    side.click();
+                } else {
+                    this.showTab(tab);
+                }
+            });
+        });
+
+        // Bottom nav delegate to sidebar if possible
         document.querySelectorAll('.kiq-bottom-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
                 const route = btn.dataset.route;
-                this.showTab(route);
+                const side = document.querySelector(`.kiq-side-btn[data-tab="${route}"]`);
+                if (side) {
+                    side.click();
+                } else {
+                    this.showTab(route);
+                }
                 // update bottom nav active state
                 document.querySelectorAll('.kiq-bottom-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
@@ -139,6 +232,37 @@ class KitchenIQDashboard {
             });
         }
 
+        // Manual inventory form submit
+        const inventoryForm = document.getElementById('kiq-inventory-form');
+        if (inventoryForm) {
+            inventoryForm.addEventListener('submit', (e) => this.addManualInventoryItem(e));
+        }
+
+        // Inventory inline edits/removals (delegated)
+        const inventoryList = document.getElementById('kiq-inventory-list');
+        if (inventoryList) {
+            inventoryList.addEventListener('click', (e) => {
+                const removeBtn = e.target.closest('[data-action="remove-item"]');
+                if (removeBtn) {
+                    const idx = parseInt(removeBtn.closest('[data-index]')?.dataset.index || '-1', 10);
+                    if (idx >= 0) this.removeInventoryItem(idx);
+                }
+            });
+
+            inventoryList.addEventListener('change', (e) => {
+                const parent = e.target.closest('[data-index]');
+                if (!parent) return;
+                const idx = parseInt(parent.dataset.index || '-1', 10);
+                if (idx < 0 || !this.inventory || !this.inventory[idx]) return;
+                if (e.target.dataset.action === 'qty') {
+                    const val = parseFloat(e.target.value);
+                    this.updateInventoryItem(idx, { quantity: isNaN(val) ? 0 : val });
+                } else if (e.target.dataset.action === 'status') {
+                    this.updateInventoryItem(idx, { status: e.target.value || 'fresh' });
+                }
+            });
+        }
+
         // Camera upload
         const cameraBtn = document.getElementById('kiq-camera-btn');
         if (cameraBtn) {
@@ -167,6 +291,14 @@ class KitchenIQDashboard {
         const menuToggle = document.getElementById('kiq-menu-toggle');
         if (menuToggle) {
             menuToggle.addEventListener('click', () => {
+                // On small screens, toggle an app-level class that shows the off-canvas sidebar.
+                if (document.body.classList.contains('kiq-sidebar-open')) {
+                    this.closeSidebar();
+                } else {
+                    this.openSidebar();
+                }
+
+                // Also toggle the top nav for slightly larger small screens where top nav is visible
                 const topNav = document.getElementById('kiq-top-nav');
                 if (topNav) topNav.classList.toggle('hidden');
             });
@@ -192,14 +324,35 @@ class KitchenIQDashboard {
             el.className = 'kiq-member';
             el.dataset.index = i;
 
-            // Name / appetite / age row
-            const row = document.createElement('div');
-            row.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:6px;';
+            // Header with name and remove button
+            const header = document.createElement('div');
+            header.className = 'kiq-member-header';
 
             const nameInput = document.createElement('input');
             nameInput.className = 'member-name';
             nameInput.placeholder = `Member ${idx} name`;
             nameInput.value = member.name || '';
+            nameInput.style.border = 'none';
+            nameInput.style.background = 'transparent';
+            nameInput.style.flex = '1';
+
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.className = 'kiq-remove-member';
+            removeBtn.textContent = '−';
+            removeBtn.setAttribute('aria-label', 'Remove member');
+            removeBtn.title = 'Remove member';
+
+            header.appendChild(nameInput);
+            header.appendChild(removeBtn);
+
+            // Body with details
+            const body = document.createElement('div');
+            body.className = 'kiq-member-body';
+
+            // Appetite and age row
+            const row1 = document.createElement('div');
+            row1.style.cssText = 'display:flex;gap:8px;align-items:center;';
 
             const appetiteLabel = document.createElement('label');
             appetiteLabel.style.fontSize = '12px';
@@ -207,6 +360,9 @@ class KitchenIQDashboard {
 
             const appetiteSelect = document.createElement('select');
             appetiteSelect.className = 'member-appetite';
+            appetiteSelect.style.border = '1px solid var(--kiq-border)';
+            appetiteSelect.style.borderRadius = '8px';
+            appetiteSelect.style.padding = '6px 8px';
             [1,2,3,4,5].forEach(v => {
                 const opt = document.createElement('option'); opt.value = String(v); opt.textContent = String(v);
                 appetiteSelect.appendChild(opt);
@@ -215,47 +371,57 @@ class KitchenIQDashboard {
 
             const ageInput = document.createElement('input');
             ageInput.className = 'member-age';
-            ageInput.placeholder = 'age';
-            ageInput.style.width = '60px';
+            ageInput.placeholder = 'Age';
             ageInput.value = member.age || '';
+            ageInput.style.maxWidth = '80px';
+            ageInput.style.border = '1px solid var(--kiq-border)';
+            ageInput.style.borderRadius = '8px';
+            ageInput.style.padding = '6px 8px';
 
-            const removeBtn = document.createElement('button');
-            removeBtn.type = 'button';
-            removeBtn.className = 'btn btn-outline kiq-remove-member';
-            removeBtn.textContent = 'Remove';
-            removeBtn.style.marginLeft = '8px';
+            row1.appendChild(appetiteLabel);
+            row1.appendChild(appetiteSelect);
+            row1.appendChild(ageInput);
 
-            row.appendChild(nameInput);
-            row.appendChild(appetiteLabel);
-            row.appendChild(appetiteSelect);
-            row.appendChild(ageInput);
-            row.appendChild(removeBtn);
-
-            // Allergies/intolerances row
+            // Allergies row
             const row2 = document.createElement('div');
-            row2.style.cssText = 'display:flex;gap:8px;margin-bottom:10px;';
             const allergiesInput = document.createElement('input');
             allergiesInput.className = 'member-allergies';
             allergiesInput.placeholder = 'Allergies (comma separated)';
-            allergiesInput.style.flex = '1';
+            allergiesInput.style.width = '100%';
+            allergiesInput.style.border = '1px solid var(--kiq-border)';
+            allergiesInput.style.borderRadius = '8px';
+            allergiesInput.style.padding = '6px 8px';
             allergiesInput.value = (member.allergies||[]).join(', ');
+            row2.appendChild(allergiesInput);
+
+            // Intolerances row
+            const row3 = document.createElement('div');
             const intolerancesInput = document.createElement('input');
             intolerancesInput.className = 'member-intolerances';
-            intolerancesInput.placeholder = 'Intolerances (comma)';
-            intolerancesInput.style.flex = '1';
+            intolerancesInput.placeholder = 'Intolerances (comma separated)';
+            intolerancesInput.style.width = '100%';
+            intolerancesInput.style.border = '1px solid var(--kiq-border)';
+            intolerancesInput.style.borderRadius = '8px';
+            intolerancesInput.style.padding = '6px 8px';
             intolerancesInput.value = (member.intolerances||[]).join(', ');
-            row2.appendChild(allergiesInput);
-            row2.appendChild(intolerancesInput);
+            row3.appendChild(intolerancesInput);
 
             // Dislikes row
-            const row3 = document.createElement('div');
-            row3.style.cssText = 'margin-bottom:12px;';
+            const row4 = document.createElement('div');
             const dislikesInput = document.createElement('input');
             dislikesInput.className = 'member-dislikes';
             dislikesInput.placeholder = 'Dislikes (comma separated)';
             dislikesInput.style.width = '100%';
+            dislikesInput.style.border = '1px solid var(--kiq-border)';
+            dislikesInput.style.borderRadius = '8px';
+            dislikesInput.style.padding = '6px 8px';
             dislikesInput.value = (member.dislikes||[]).join(', ');
-            row3.appendChild(dislikesInput);
+            row4.appendChild(dislikesInput);
+
+            body.appendChild(row1);
+            body.appendChild(row2);
+            body.appendChild(row3);
+            body.appendChild(row4);
 
             // wire remove
             removeBtn.addEventListener('click', () => {
@@ -269,9 +435,8 @@ class KitchenIQDashboard {
                 inp.addEventListener('change', () => this.scheduleAutosave());
             });
 
-            el.appendChild(row);
-            el.appendChild(row2);
-            el.appendChild(row3);
+            el.appendChild(header);
+            el.appendChild(body);
 
             container.appendChild(el);
         }
@@ -297,14 +462,14 @@ class KitchenIQDashboard {
                             <option value="4">4</option>
                             <option value="5">5</option>
                         </select>
-                        <input class="member-age" placeholder="age" style="width:60px;" />
+                        <input class="member-age" placeholder="age" />
                     </div>
                     <div style="display:flex;gap:8px;margin-bottom:10px;">
                         <input class="member-allergies" placeholder="Allergies (comma separated)" style="flex:1;" />
                         <input class="member-intolerances" placeholder="Intolerances (comma)" style="flex:1;" />
                     </div>
                     <div style="margin-bottom:12px;">
-                        <input class="member-dislikes" placeholder="Dislikes (comma separated)" style="width:100%;" />
+                        <input class="member-dislikes" placeholder="Dislikes (comma separated)" />
                     </div>
                 `;
                 el.querySelectorAll('input, select').forEach(inp => {
@@ -333,6 +498,13 @@ class KitchenIQDashboard {
         if (stepEl) stepEl.classList.remove('hidden');
         document.getElementById('kiq-step-prev').classList.toggle('hidden', n === 1);
         document.getElementById('kiq-step-next').textContent = n >= document.querySelectorAll('.onboard-step').length ? 'Save' : 'Next →';
+
+        const bar = document.querySelector('.kiq-stepper-bar');
+        if (bar) {
+            const total = document.querySelectorAll('.onboard-step').length || 1;
+            const pct = Math.min(100, Math.max(0, (n / total) * 100));
+            bar.style.width = `${pct}%`;
+        }
     }
 
     onboardNext() {
@@ -427,6 +599,136 @@ class KitchenIQDashboard {
         this._savedTimeout = setTimeout(() => el.style.display = 'none', 1800);
     }
 
+    updateProfileSummary() {
+        try {
+            const profile = this.profile || {};
+            const summary = document.getElementById('kiq-profile-summary');
+            if (summary) {
+                summary.textContent = `${profile.household_size || 2} person household | ${profile.cooking_skill || 'unknown'} cook | ${profile.budget_level || 'moderate'} budget`;
+            }
+            const currentUserEl = document.getElementById('current-user');
+            if (currentUserEl) {
+                currentUserEl.textContent = String(this.currentUser || '');
+            }
+        } catch (err) {
+            // ignore
+        }
+    }
+
+    // Open the sidebar overlay and trap focus
+    openSidebar() {
+        if (document.body.classList.contains('kiq-sidebar-open')) return;
+
+        // remember previous active element to restore focus on close
+        this._prevActiveElement = document.activeElement;
+
+        document.body.classList.add('kiq-sidebar-open');
+
+        // insert overlay element if not present
+        let overlay = document.querySelector('.kiq-sidebar-overlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.className = 'kiq-sidebar-overlay';
+            document.body.appendChild(overlay);
+        }
+
+        // aria-hide the main content regions so screen readers ignore them
+        const main = document.querySelector('.kiq-main');
+        const bottom = document.querySelector('.kiq-bottom-nav');
+        const topNav = document.getElementById('kiq-top-nav');
+        if (main) main.setAttribute('aria-hidden', 'true');
+        if (bottom) bottom.setAttribute('aria-hidden', 'true');
+        if (topNav) topNav.setAttribute('aria-hidden', 'true');
+
+        // focus the first focusable element inside the sidebar
+        const sidebar = document.querySelector('.kiq-sidebar');
+        if (sidebar) {
+            const focusable = this._getFocusable(sidebar);
+            if (focusable.length) {
+                focusable[0].focus();
+            } else {
+                sidebar.setAttribute('tabindex', '-1');
+                sidebar.focus();
+            }
+        }
+
+        // click on overlay should close
+        overlay.addEventListener('click', this._overlayClickHandler = (e) => {
+            this.closeSidebar();
+        });
+
+        // keydown handler for Escape and focus trapping
+        this._sidebarKeydownHandler = (ev) => {
+            if (ev.key === 'Escape') {
+                ev.preventDefault();
+                this.closeSidebar();
+                return;
+            }
+            if (ev.key === 'Tab') {
+                // focus trap
+                const side = document.querySelector('.kiq-sidebar');
+                const focusable = this._getFocusable(side);
+                if (!focusable.length) return;
+                const first = focusable[0];
+                const last = focusable[focusable.length - 1];
+                if (ev.shiftKey && document.activeElement === first) {
+                    ev.preventDefault();
+                    last.focus();
+                } else if (!ev.shiftKey && document.activeElement === last) {
+                    ev.preventDefault();
+                    first.focus();
+                }
+            }
+        };
+        document.addEventListener('keydown', this._sidebarKeydownHandler);
+    }
+
+    // Close the sidebar and cleanup
+    closeSidebar() {
+        if (!document.body.classList.contains('kiq-sidebar-open')) return;
+
+        document.body.classList.remove('kiq-sidebar-open');
+
+        // remove aria-hidden from main regions
+        const main = document.querySelector('.kiq-main');
+        const bottom = document.querySelector('.kiq-bottom-nav');
+        const topNav = document.getElementById('kiq-top-nav');
+        if (main) main.removeAttribute('aria-hidden');
+        if (bottom) bottom.removeAttribute('aria-hidden');
+        if (topNav) topNav.removeAttribute('aria-hidden');
+
+        // remove overlay click listener and element
+        const overlay = document.querySelector('.kiq-sidebar-overlay');
+        if (overlay) {
+            overlay.removeEventListener('click', this._overlayClickHandler);
+            // optionally remove from DOM
+            overlay.parentNode && overlay.parentNode.removeChild(overlay);
+        }
+
+        // remove keydown listener
+        if (this._sidebarKeydownHandler) {
+            document.removeEventListener('keydown', this._sidebarKeydownHandler);
+            this._sidebarKeydownHandler = null;
+        }
+
+        // restore focus to previously active element
+        if (this._prevActiveElement && typeof this._prevActiveElement.focus === 'function') {
+            this._prevActiveElement.focus();
+        }
+        this._prevActiveElement = null;
+    }
+
+    // Utility: return focusable elements inside container
+    _getFocusable(container) {
+        if (!container) return [];
+        try {
+            return Array.from(container.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'))
+                .filter(el => el.offsetParent !== null); // visible
+        } catch (e) {
+            return [];
+        }
+    }
+
     /* PWA registration (manifest injection + service worker) */
     registerPWA() {
         try {
@@ -509,8 +811,16 @@ class KitchenIQDashboard {
         const bottomBtn = document.querySelector(`.kiq-bottom-btn[data-route="${tabName}"]`);
         if (bottomBtn) bottomBtn.classList.add('active');
 
+        // update sidebar active state (sidebar is canonical nav)
+        document.querySelectorAll('.kiq-side-btn').forEach(b => b.classList.remove('active'));
+        const sideBtn = document.querySelector(`.kiq-side-btn[data-tab="${tabName}"]`);
+        if (sideBtn) sideBtn.classList.add('active');
+        // aria-current for assistive tech
+        document.querySelectorAll('.kiq-side-btn').forEach(b => b.removeAttribute('aria-current'));
+        if (sideBtn) sideBtn.setAttribute('aria-current', 'true');
+
         // Load data if needed
-        if (tabName === 'dashboard') {
+        if (tabName === 'dashboard' || tabName === 'inventory') {
             this.loadInventory();
         }
     }
@@ -704,22 +1014,103 @@ class KitchenIQDashboard {
         if (!container) return;
 
         if (!this.inventory || this.inventory.length === 0) {
-            container.innerHTML = '<p>No items in inventory. Try scanning with your camera!</p>';
+            container.innerHTML = `
+                <div class="kiq-empty">
+                    <h3>No items yet</h3>
+                    <p class="kiq-muted">Scan your pantry or add items manually to keep meals accurate.</p>
+                </div>`;
             return;
         }
 
-        const itemsHtml = this.inventory.map(item => `
-            <div class="kiq-inventory-item">
-                <div class="kiq-item-name">${item.name}</div>
-                <div class="kiq-item-details">
-                    <span class="kiq-category">${item.category || 'general'}</span>
-                    <span class="kiq-status ${item.status || 'fresh'}">${item.status || 'Fresh'}</span>
+        const itemsHtml = this.inventory.map((item, idx) => `
+            <div class="kiq-inventory-item" data-index="${idx}">
+                <div class="kiq-item-top">
+                    <div>
+                        <div class="kiq-item-name">${item.name || 'Unnamed item'}</div>
+                        <div class="kiq-item-details">
+                            <span class="kiq-category">${item.category || 'general'}</span>
+                            <span class="kiq-status ${item.status || 'fresh'}">${(item.status || 'fresh')}</span>
+                        </div>
+                        ${item.expiry_estimate ? `<div class="kiq-expiry">Expires: ${item.expiry_estimate}</div>` : ''}
+                    </div>
+                    <div class="kiq-item-actions">
+                        ${item.quantity ? `<span class="kiq-pill-muted">Qty: ${item.quantity}</span>` : ''}
+                        <button type="button" class="kiq-remove-btn" data-action="remove-item" aria-label="Remove ${item.name || 'item'}">Remove</button>
+                    </div>
                 </div>
-                ${item.expiry_estimate ? `<div class="kiq-expiry">Expires: ${item.expiry_estimate}</div>` : ''}
+
+                <div class="kiq-item-edit">
+                    <label>Quantity
+                        <input type="number" min="0" step="0.25" value="${item.quantity ?? 1}" data-action="qty" />
+                    </label>
+                    <label>Status
+                        <select data-action="status">
+                            <option value="fresh" ${item.status === 'fresh' ? 'selected' : ''}>Fresh</option>
+                            <option value="low" ${item.status === 'low' ? 'selected' : ''}>Low</option>
+                            <option value="out" ${item.status === 'out' ? 'selected' : ''}>Out</option>
+                        </select>
+                    </label>
+                </div>
             </div>
         `).join('');
 
         container.innerHTML = itemsHtml;
+    }
+
+    addManualInventoryItem(e) {
+        e.preventDefault();
+        const form = e.target;
+        const name = form.name?.value?.trim();
+        if (!name) {
+            this.showNotification('Please enter an item name', 'error');
+            return;
+        }
+        const quantity = parseFloat(form.quantity?.value || '1') || 1;
+        const category = form.category?.value || 'pantry';
+        const status = form.status?.value || 'fresh';
+
+        if (!this.inventory) this.inventory = [];
+        this.inventory.push({ name, quantity, category, status });
+        this.renderInventory();
+        this.saveInventory({ silent: true });
+        form.reset();
+        const qty = form.querySelector('#kiq-item-quantity');
+        if (qty) qty.value = 1;
+        this.showNotification('Item added to inventory', 'success');
+    }
+
+    updateInventoryItem(index, updates = {}) {
+        if (!this.inventory || !this.inventory[index]) return;
+        this.inventory[index] = { ...this.inventory[index], ...updates };
+        this.saveInventory({ silent: true });
+        this.renderInventory();
+    }
+
+    removeInventoryItem(index) {
+        if (!this.inventory || !this.inventory[index]) return;
+        this.inventory.splice(index, 1);
+        this.saveInventory({ silent: true });
+        this.renderInventory();
+    }
+
+    formatInstructions(instructions) {
+        if (!instructions) return [];
+
+        // Prefer explicit line breaks; fallback to sentence splits if needed
+        const lineSplit = instructions
+            .replace(/\r\n/g, '\n')
+            .split(/\n+/)
+            .map(s => s.trim())
+            .filter(Boolean);
+
+        if (lineSplit.length > 1) return lineSplit;
+
+        const sentenceSplit = instructions
+            .split(/(?<=[.!?])\s+(?=[A-Z0-9])/)
+            .map(s => s.trim())
+            .filter(Boolean);
+
+        return sentenceSplit.length ? sentenceSplit : [instructions.trim()];
     }
 
     renderMealPlan() {
@@ -731,11 +1122,23 @@ class KitchenIQDashboard {
 
         const mealsHtml = meals.map((meal, idx) => `
             <div class="kiq-meal-card">
-                <h3>${meal.meal_name}</h3>
+                <div class="kiq-meal-header">
+                    <h3>${meal.meal_name}</h3>
+                </div>
+                
                 <div class="kiq-meal-meta">
-                    <span class="kiq-meal-type">${meal.meal_type}</span>
-                    <span class="kiq-cooking-time">${meal.cooking_time_mins || '?'} mins</span>
-                    <span class="kiq-difficulty">${meal.difficulty || 'medium'}</span>
+                    <div class="kiq-meta-pill">
+                        <span class="kiq-meta-label">Course</span>
+                        <span class="kiq-meta-value">${meal.meal_type || 'Meal'}</span>
+                    </div>
+                    <div class="kiq-meta-pill">
+                        <span class="kiq-meta-label">Cook time</span>
+                        <span class="kiq-meta-value">${meal.cooking_time_mins || '?'} mins</span>
+                    </div>
+                    <div class="kiq-meta-pill">
+                        <span class="kiq-meta-label">Effort</span>
+                        <span class="kiq-meta-value">${meal.difficulty || 'Medium'}</span>
+                    </div>
                 </div>
                 
                 <div class="kiq-ingredients">
@@ -759,36 +1162,56 @@ class KitchenIQDashboard {
                 ` : ''}
 
                 <div class="kiq-instructions">
-                    <p>${meal.instructions}</p>
+                    <h4>Instructions:</h4>
+                    ${(() => {
+                        const steps = this.formatInstructions(meal.instructions);
+                        return steps.length ? `<ol class="kiq-steps">${steps.map(step => `<li>${step}</li>`).join('')}</ol>` : '<p>No instructions provided.</p>';
+                    })()}
                 </div>
 
                 <div class="kiq-meal-actions">
-                    <button data-meal-index="${idx}" class="btn btn-outline kiq-select-meal">
-                        Select
+                    <button data-meal-index="${idx}" class="btn btn-primary kiq-select-meal">
+                        Select this meal
                     </button>
-                    <button onclick="kitcheniq.rateMeal('${meal.meal_name}', ${idx})" class="btn btn-primary" style="margin-left:8px;">
-                        ⭐ Rate this meal
+                    <button onclick="kitcheniq.rateMeal('${meal.meal_name}', ${idx})" class="btn btn-secondary" style="margin-left:8px;">
+                        Rate
                     </button>
+                </div>
+
+                <!-- Shopping list appears after selection -->
+                <div class="kiq-meal-shopping" style="display:none;">
+                    <hr style="margin: 16px 0; border: none; border-top: 1px solid #e0e0e0;" />
+                    <div class="kiq-shopping-list-inline">
+                        <h4>Items to Consider Buying:</h4>
+                        ${!this.inventory || this.inventory.length === 0 ? `
+                            <p style="color: #d97706; font-size: 13px; margin: 0 0 12px 0; background-color: #fef3c7; border-left: 3px solid #f59e0b; padding: 10px 12px; border-radius: 4px;">
+                                💡 <strong>Scan your pantry</strong> to see what you already have and get accurate shopping recommendations.
+                            </p>
+                        ` : `
+                            <p style="color: #666; font-size: 12px; margin: 0 0 12px 0; font-style: italic;">
+                                Based on common pantry items.
+                            </p>
+                        `}
+                        <ul>
+                            ${meal.missing_items?.length ? meal.missing_items.map(item => `<li>${item.item}</li>`).join('') : '<li class="kiq-no-items"><em>No specific items flagged as missing for this meal</em></li>'}
+                        </ul>
+                    </div>
                 </div>
             </div>
         `).join('');
 
-        const shoppingHtml = shopping.missing_items?.length ? `
-            <div class="kiq-shopping-list">
-                <h3>Shopping List</h3>
-                <ul>
-                    ${shopping.missing_items.map(item => `<li>${item}</li>`).join('')}
-                </ul>
-            </div>
-        ` : '';
+        container.innerHTML = mealsHtml;
 
-        container.innerHTML = mealsHtml + shoppingHtml;
-
-        // Wire select handlers to update selected ingredients area
+        // Wire select handlers to show shopping list and update selected ingredients area
         setTimeout(() => {
             document.querySelectorAll('.kiq-select-meal').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     const idx = parseInt(btn.dataset.mealIndex, 10);
+                    const card = btn.closest('.kiq-meal-card');
+                    const shoppingDiv = card?.querySelector('.kiq-meal-shopping');
+                    if (shoppingDiv) {
+                        shoppingDiv.style.display = shoppingDiv.style.display === 'none' ? 'block' : 'none';
+                    }
                     this.showMealIngredients(idx);
                 });
             });
@@ -804,7 +1227,7 @@ class KitchenIQDashboard {
             return;
         }
 
-        const ingHtml = (sel.ingredients_used || []).map(i => `<li>${i.ingredient} — ${i.quantity}</li>`).join('');
+        const ingHtml = (sel.ingredients_used || []).map(i => `<li>${i.ingredient} - ${i.quantity}</li>`).join('');
         const missHtml = (sel.missing_items || []).map(m => `<li>${m.item} (${m.importance})</li>`).join('');
 
         container.innerHTML = `
