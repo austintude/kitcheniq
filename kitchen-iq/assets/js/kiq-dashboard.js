@@ -11,6 +11,19 @@ class KitchenIQDashboard {
         this.profile = null;
         this.inventory = null;
         this.mealPlan = null;
+        this.selectedMealIndex = null;
+        this.stapleItems = [
+            'salt',
+            'pepper',
+            'black pepper',
+            'sea salt',
+            'kosher salt',
+            'olive oil',
+            'vegetable oil',
+            'cooking spray',
+            'nonstick spray',
+            'water',
+        ];
         
         this.init();
     }
@@ -80,6 +93,9 @@ class KitchenIQDashboard {
             const data = await response.json();
             this.inventory = data.inventory || [];
             this.renderInventory();
+            if (this.mealPlan) {
+                this.renderMealPlan();
+            }
         } catch (error) {
             console.error('Failed to load inventory:', error);
         }
@@ -102,6 +118,12 @@ class KitchenIQDashboard {
             this.inventory = data.inventory || this.inventory;
             if (!silent) this.showNotification('Inventory updated', 'success');
             this.renderInventory();
+            if (this.mealPlan) {
+                this.renderMealPlan();
+                if (this.selectedMealIndex !== null) {
+                    this.showMealIngredients(this.selectedMealIndex);
+                }
+            }
         } catch (err) {
             console.error('Save inventory error:', err);
             if (!silent) this.showNotification('Could not update inventory', 'error');
@@ -229,6 +251,20 @@ class KitchenIQDashboard {
             moreBtn.addEventListener('click', () => {
                 const seed = String(Date.now());
                 this.generateMealsWithOptions(seed);
+            });
+        }
+
+        const mealResultsContainer = document.getElementById('kiq-meal-results');
+        if (mealResultsContainer) {
+            mealResultsContainer.addEventListener('click', (e) => {
+                const addBtn = e.target.closest('[data-action="add-missing-item"]');
+                if (addBtn) {
+                    const mealIndex = parseInt(addBtn.dataset.mealIndex || '-1', 10);
+                    const itemName = addBtn.dataset.missingName;
+                    if (mealIndex >= 0 && itemName) {
+                        this.addMissingItemToPantry(mealIndex, itemName);
+                    }
+                }
             });
         }
 
@@ -1093,6 +1129,80 @@ class KitchenIQDashboard {
         this.renderInventory();
     }
 
+    normalizeItemName(name) {
+        return (name || '').toString().trim().toLowerCase();
+    }
+
+    escapeForRegex(value) {
+        return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    isStapleItem(name) {
+        const normalized = this.normalizeItemName(name);
+        if (!normalized) return false;
+        return this.stapleItems.some((staple) => {
+            const stapleNorm = this.escapeForRegex(this.normalizeItemName(staple));
+            const pattern = new RegExp(`\\b${stapleNorm}\\b`, 'i');
+            return pattern.test(normalized);
+        });
+    }
+
+    inventoryHasItem(name) {
+        const normalized = this.normalizeItemName(name);
+        if (!normalized || !Array.isArray(this.inventory)) return false;
+        return this.inventory.some((item) => this.normalizeItemName(item.name) === normalized);
+    }
+
+    getFilteredMissingItems(meal) {
+        const items = meal?.missing_items || [];
+        const seen = new Set();
+        return items.filter((entry) => {
+            const normalized = this.normalizeItemName(entry.item);
+            if (!normalized || seen.has(normalized)) return false;
+            if (this.isStapleItem(normalized)) return false;
+            if (this.inventoryHasItem(normalized)) return false;
+            seen.add(normalized);
+            return true;
+        });
+    }
+
+    cleanInstructionStep(step) {
+        if (!step) return '';
+        return step.replace(/^\s*(?:\d+[.)]\s*|[a-zA-Z]\)\s*|[\-\u2022•]\s+)?/, '').trim();
+    }
+
+    addMissingItemToPantry(mealIndex, itemName) {
+        if (!itemName) return;
+        const normalized = this.normalizeItemName(itemName);
+        if (!normalized) return;
+
+        if (!this.inventory) this.inventory = [];
+
+        if (this.inventoryHasItem(normalized)) {
+            this.removeMissingItemFromMeals(itemName);
+            this.renderMealPlan();
+            if (this.selectedMealIndex !== null) this.showMealIngredients(this.selectedMealIndex);
+            this.showNotification(`${itemName} is already in your pantry`, 'info');
+            return;
+        }
+
+        this.inventory.push({ name: itemName, quantity: 1, category: 'pantry', status: 'fresh' });
+        this.saveInventory({ silent: true });
+        this.removeMissingItemFromMeals(itemName);
+        this.renderMealPlan();
+        if (this.selectedMealIndex !== null) this.showMealIngredients(this.selectedMealIndex);
+        this.showNotification(`${itemName} added to pantry`, 'success');
+    }
+
+    removeMissingItemFromMeals(itemName) {
+        if (!this.mealPlan || !Array.isArray(this.mealPlan.meals)) return;
+        const normalized = this.normalizeItemName(itemName);
+        this.mealPlan.meals = this.mealPlan.meals.map((meal) => {
+            const filteredMissing = (meal.missing_items || []).filter((entry) => this.normalizeItemName(entry.item) !== normalized);
+            return { ...meal, missing_items: filteredMissing };
+        });
+    }
+
     formatInstructions(instructions) {
         if (!instructions) return [];
 
@@ -1103,14 +1213,17 @@ class KitchenIQDashboard {
             .map(s => s.trim())
             .filter(Boolean);
 
-        if (lineSplit.length > 1) return lineSplit;
+        if (lineSplit.length > 1) {
+            return lineSplit.map((step) => this.cleanInstructionStep(step)).filter(Boolean);
+        }
 
         const sentenceSplit = instructions
             .split(/(?<=[.!?])\s+(?=[A-Z0-9])/)
             .map(s => s.trim())
             .filter(Boolean);
 
-        return sentenceSplit.length ? sentenceSplit : [instructions.trim()];
+        const steps = sentenceSplit.length ? sentenceSplit : [instructions.trim()];
+        return steps.map((step) => this.cleanInstructionStep(step)).filter(Boolean);
     }
 
     renderMealPlan() {
@@ -1118,87 +1231,92 @@ class KitchenIQDashboard {
         if (!container || !this.mealPlan) return;
 
         const meals = this.mealPlan.meals || [];
-        const shopping = this.mealPlan.shopping_list || {};
 
-        const mealsHtml = meals.map((meal, idx) => `
-            <div class="kiq-meal-card">
-                <div class="kiq-meal-header">
-                    <h3>${meal.meal_name}</h3>
-                </div>
-                
-                <div class="kiq-meal-meta">
-                    <div class="kiq-meta-pill">
-                        <span class="kiq-meta-label">Course</span>
-                        <span class="kiq-meta-value">${meal.meal_type || 'Meal'}</span>
-                    </div>
-                    <div class="kiq-meta-pill">
-                        <span class="kiq-meta-label">Cook time</span>
-                        <span class="kiq-meta-value">${meal.cooking_time_mins || '?'} mins</span>
-                    </div>
-                    <div class="kiq-meta-pill">
-                        <span class="kiq-meta-label">Effort</span>
-                        <span class="kiq-meta-value">${meal.difficulty || 'Medium'}</span>
-                    </div>
-                </div>
-                
-                <div class="kiq-ingredients">
-                    <h4>Ingredients:</h4>
-                    <ul>
-                        ${(meal.ingredients_used || []).map(ing => `
-                            <li>${ing.ingredient} - ${ing.quantity}</li>
-                        `).join('')}
-                    </ul>
-                </div>
+        const mealsHtml = meals.map((meal, idx) => {
+            const filteredMissing = this.getFilteredMissingItems(meal);
+            const missingList = filteredMissing.length
+                ? filteredMissing.map(item => `
+                    <li>
+                        ${item.item} <small>(${item.importance || 'needed'})</small>
+                        <button type="button" class="btn btn-link kiq-inline-add" data-action="add-missing-item" data-meal-index="${idx}" data-missing-name="${item.item}">Add to pantry</button>
+                    </li>
+                `).join('')
+                : '<li class="kiq-no-items"><em>All covered by your pantry or staples</em></li>';
 
-                ${meal.missing_items?.length ? `
-                    <div class="kiq-missing">
-                        <h4>Need to buy:</h4>
+            return `
+                <div class="kiq-meal-card">
+                    <div class="kiq-meal-header">
+                        <h3>${meal.meal_name}</h3>
+                    </div>
+
+                    <div class="kiq-meal-meta">
+                        <div class="kiq-meta-pill">
+                            <span class="kiq-meta-label">Course</span>
+                            <span class="kiq-meta-value">${meal.meal_type || 'Meal'}</span>
+                        </div>
+                        <div class="kiq-meta-pill">
+                            <span class="kiq-meta-label">Cook time</span>
+                            <span class="kiq-meta-value">${meal.cooking_time_mins || '?'} mins</span>
+                        </div>
+                        <div class="kiq-meta-pill">
+                            <span class="kiq-meta-label">Effort</span>
+                            <span class="kiq-meta-value">${meal.difficulty || 'Medium'}</span>
+                        </div>
+                    </div>
+
+                    <div class="kiq-ingredients">
+                        <h4>Ingredients:</h4>
                         <ul>
-                            ${meal.missing_items.map(item => `
-                                <li>${item.item} <small>(${item.importance})</small></li>
+                            ${(meal.ingredients_used || []).map(ing => `
+                                <li>${ing.ingredient} - ${ing.quantity}</li>
                             `).join('')}
                         </ul>
                     </div>
-                ` : ''}
 
-                <div class="kiq-instructions">
-                    <h4>Instructions:</h4>
-                    ${(() => {
-                        const steps = this.formatInstructions(meal.instructions);
-                        return steps.length ? `<ol class="kiq-steps">${steps.map(step => `<li>${step}</li>`).join('')}</ol>` : '<p>No instructions provided.</p>';
-                    })()}
-                </div>
+                    <div class="kiq-missing">
+                        <h4>Need to buy:</h4>
+                        <ul>${missingList}</ul>
+                    </div>
 
-                <div class="kiq-meal-actions">
-                    <button data-meal-index="${idx}" class="btn btn-primary kiq-select-meal">
-                        Select this meal
-                    </button>
-                    <button onclick="kitcheniq.rateMeal('${meal.meal_name}', ${idx})" class="btn btn-secondary" style="margin-left:8px;">
-                        Rate
-                    </button>
-                </div>
+                    <div class="kiq-instructions">
+                        <h4>Instructions:</h4>
+                        ${(() => {
+                            const steps = this.formatInstructions(meal.instructions);
+                            return steps.length ? `<ol class="kiq-steps">${steps.map(step => `<li>${step}</li>`).join('')}</ol>` : '<p>No instructions provided.</p>';
+                        })()}
+                    </div>
 
-                <!-- Shopping list appears after selection -->
-                <div class="kiq-meal-shopping" style="display:none;">
-                    <hr style="margin: 16px 0; border: none; border-top: 1px solid #e0e0e0;" />
-                    <div class="kiq-shopping-list-inline">
-                        <h4>Items to Consider Buying:</h4>
-                        ${!this.inventory || this.inventory.length === 0 ? `
-                            <p style="color: #d97706; font-size: 13px; margin: 0 0 12px 0; background-color: #fef3c7; border-left: 3px solid #f59e0b; padding: 10px 12px; border-radius: 4px;">
-                                💡 <strong>Scan your pantry</strong> to see what you already have and get accurate shopping recommendations.
-                            </p>
-                        ` : `
-                            <p style="color: #666; font-size: 12px; margin: 0 0 12px 0; font-style: italic;">
-                                Based on common pantry items.
-                            </p>
-                        `}
-                        <ul>
-                            ${meal.missing_items?.length ? meal.missing_items.map(item => `<li>${item.item}</li>`).join('') : '<li class="kiq-no-items"><em>No specific items flagged as missing for this meal</em></li>'}
-                        </ul>
+                    <div class="kiq-meal-actions">
+                        <button data-meal-index="${idx}" class="btn btn-primary kiq-select-meal">
+                            Select this meal
+                        </button>
+                        <button onclick="kitcheniq.rateMeal('${meal.meal_name}', ${idx})" class="btn btn-secondary" style="margin-left:8px;">
+                            Rate
+                        </button>
+                    </div>
+
+                    <!-- Shopping list appears after selection -->
+                    <div class="kiq-meal-shopping" style="display:none;">
+                        <hr style="margin: 16px 0; border: none; border-top: 1px solid #e0e0e0;" />
+                        <div class="kiq-shopping-list-inline">
+                            <h4>Items to Consider Buying:</h4>
+                            ${!this.inventory || this.inventory.length === 0 ? `
+                                <p style="color: #d97706; font-size: 13px; margin: 0 0 12px 0; background-color: #fef3c7; border-left: 3px solid #f59e0b; padding: 10px 12px; border-radius: 4px;">
+                                    💡 <strong>Scan your pantry</strong> to see what you already have and get accurate shopping recommendations.
+                                </p>
+                            ` : `
+                                <p style="color: #666; font-size: 12px; margin: 0 0 12px 0; font-style: italic;">
+                                    Based on common pantry items.
+                                </p>
+                            `}
+                            <ul>
+                                ${filteredMissing.length ? filteredMissing.map(item => `<li>${item.item}</li>`).join('') : '<li class="kiq-no-items"><em>No specific items flagged as missing for this meal</em></li>'}
+                            </ul>
+                        </div>
                     </div>
                 </div>
-            </div>
-        `).join('');
+            `;
+        }).join('');
 
         container.innerHTML = mealsHtml;
 
@@ -1219,6 +1337,7 @@ class KitchenIQDashboard {
     }
 
     showMealIngredients(index) {
+        this.selectedMealIndex = typeof index === 'number' ? index : null;
         const sel = (this.mealPlan && this.mealPlan.meals) ? this.mealPlan.meals[index] : null;
         const container = document.getElementById('kiq-selected-ingredients');
         if (!container) return;
@@ -1228,7 +1347,8 @@ class KitchenIQDashboard {
         }
 
         const ingHtml = (sel.ingredients_used || []).map(i => `<li>${i.ingredient} - ${i.quantity}</li>`).join('');
-        const missHtml = (sel.missing_items || []).map(m => `<li>${m.item} (${m.importance})</li>`).join('');
+        const filteredMissing = this.getFilteredMissingItems(sel);
+        const missHtml = filteredMissing.map(m => `<li>${m.item} (${m.importance || 'needed'})</li>`).join('');
 
         container.innerHTML = `
             <div class="kiq-selected-meal">
