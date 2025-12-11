@@ -72,12 +72,234 @@ class KIQ_Admin {
 
         add_submenu_page(
             'kitcheniq',
+            'User Management',
+            'Users',
+            'manage_options',
+            'kitcheniq-users',
+            array( __CLASS__, 'render_user_management' )
+        );
+
+        add_submenu_page(
+            'kitcheniq',
             'Debug & Logs',
             'Debug',
             'manage_options',
             'kitcheniq-debug',
             array( __CLASS__, 'render_debug' )
         );
+    }
+
+    private static function get_plan_options() {
+        return array(
+            'free'  => __( 'Free', 'kitchen-iq' ),
+            'basic' => __( 'Basic', 'kitchen-iq' ),
+            'pro'   => __( 'Pro (unlimited)', 'kitchen-iq' ),
+        );
+    }
+
+    public static function render_user_management() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            return;
+        }
+
+        $messages     = array();
+        $errors       = array();
+        $plan_options = self::get_plan_options();
+
+        // Handle new user creation.
+        if ( isset( $_POST['kiq_create_user'] ) ) {
+            check_admin_referer( 'kiq_create_user' );
+
+            $email      = sanitize_email( wp_unslash( $_POST['kiq_user_email'] ?? '' ) );
+            $first_name = sanitize_text_field( wp_unslash( $_POST['kiq_user_first_name'] ?? '' ) );
+            $last_name  = sanitize_text_field( wp_unslash( $_POST['kiq_user_last_name'] ?? '' ) );
+            $plan       = sanitize_text_field( wp_unslash( $_POST['kiq_user_plan'] ?? 'free' ) );
+            $password   = sanitize_text_field( wp_unslash( $_POST['kiq_user_password'] ?? '' ) );
+
+            if ( ! is_email( $email ) ) {
+                $errors[] = __( 'Please provide a valid email address.', 'kitchen-iq' );
+            }
+
+            if ( ! array_key_exists( $plan, $plan_options ) ) {
+                $errors[] = __( 'Invalid plan selected.', 'kitchen-iq' );
+            }
+
+            if ( empty( $password ) ) {
+                $password = wp_generate_password( 12, true );
+            }
+
+            if ( empty( $errors ) ) {
+                $username      = sanitize_user( current( explode( '@', $email ) ), true );
+                $base_username = $username ?: 'kitcheniq_user';
+                $username      = $base_username;
+                $suffix        = 1;
+
+                while ( username_exists( $username ) ) {
+                    $username = $base_username . $suffix;
+                    $suffix++;
+                }
+
+                $user_id = wp_insert_user(
+                    array(
+                        'user_login' => $username,
+                        'user_pass'  => $password,
+                        'user_email' => $email,
+                        'first_name' => $first_name,
+                        'last_name'  => $last_name,
+                        'role'       => 'subscriber',
+                    )
+                );
+
+                if ( is_wp_error( $user_id ) ) {
+                    $errors[] = $user_id->get_error_message();
+                } else {
+                    KIQ_Data::set_user_plan( $user_id, $plan );
+                    $messages[] = sprintf(
+                        /* translators: 1: user email, 2: plan */
+                        __( 'User %1$s created and assigned to %2$s plan.', 'kitchen-iq' ),
+                        esc_html( $email ),
+                        esc_html( $plan_options[ $plan ] )
+                    );
+
+                    if ( ! empty( $_POST['kiq_user_password'] ) ) {
+                        $messages[] = __( 'Password set from input. Share it securely with the user.', 'kitchen-iq' );
+                    } else {
+                        $messages[] = sprintf(
+                            /* translators: %s: generated password */
+                            __( 'Generated password: %s', 'kitchen-iq' ),
+                            esc_html( $password )
+                        );
+                    }
+                }
+            }
+        }
+
+        // Handle updating an existing user plan.
+        if ( isset( $_POST['kiq_update_plan'] ) ) {
+            check_admin_referer( 'kiq_update_plan' );
+
+            $user_id = isset( $_POST['kiq_existing_user'] ) ? absint( $_POST['kiq_existing_user'] ) : 0;
+            $plan    = sanitize_text_field( wp_unslash( $_POST['kiq_existing_plan'] ?? 'free' ) );
+
+            if ( $user_id && array_key_exists( $plan, $plan_options ) ) {
+                $user = get_userdata( $user_id );
+
+                if ( $user ) {
+                    KIQ_Data::set_user_plan( $user_id, $plan );
+                    $messages[] = sprintf(
+                        /* translators: 1: user email, 2: plan */
+                        __( 'Plan updated to %2$s for %1$s.', 'kitchen-iq' ),
+                        esc_html( $user->user_email ),
+                        esc_html( $plan_options[ $plan ] )
+                    );
+                } else {
+                    $errors[] = __( 'Selected user could not be found.', 'kitchen-iq' );
+                }
+            } else {
+                $errors[] = __( 'Please select a valid user and plan.', 'kitchen-iq' );
+            }
+        }
+
+        $users = get_users(
+            array(
+                'fields'  => array( 'ID', 'display_name', 'user_email' ),
+                'orderby' => 'display_name',
+            )
+        );
+        ?>
+        <div class="wrap">
+            <h1><?php esc_html_e( 'KitchenIQ Users', 'kitchen-iq' ); ?></h1>
+
+            <?php foreach ( $messages as $message ) : ?>
+                <div class="notice notice-success"><p><?php echo esc_html( $message ); ?></p></div>
+            <?php endforeach; ?>
+
+            <?php foreach ( $errors as $error ) : ?>
+                <div class="notice notice-error"><p><?php echo esc_html( $error ); ?></p></div>
+            <?php endforeach; ?>
+
+            <h2><?php esc_html_e( 'Create New User', 'kitchen-iq' ); ?></h2>
+            <form method="post">
+                <?php wp_nonce_field( 'kiq_create_user' ); ?>
+                <table class="form-table" role="presentation">
+                    <tbody>
+                        <tr>
+                            <th scope="row"><label for="kiq_user_email"><?php esc_html_e( 'Email (required)', 'kitchen-iq' ); ?></label></th>
+                            <td><input name="kiq_user_email" type="email" id="kiq_user_email" required class="regular-text" /></td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="kiq_user_first_name"><?php esc_html_e( 'First Name', 'kitchen-iq' ); ?></label></th>
+                            <td><input name="kiq_user_first_name" type="text" id="kiq_user_first_name" class="regular-text" /></td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="kiq_user_last_name"><?php esc_html_e( 'Last Name', 'kitchen-iq' ); ?></label></th>
+                            <td><input name="kiq_user_last_name" type="text" id="kiq_user_last_name" class="regular-text" /></td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="kiq_user_plan"><?php esc_html_e( 'Plan Level', 'kitchen-iq' ); ?></label></th>
+                            <td>
+                                <select name="kiq_user_plan" id="kiq_user_plan">
+                                    <?php foreach ( $plan_options as $key => $label ) : ?>
+                                        <option value="<?php echo esc_attr( $key ); ?>"><?php echo esc_html( $label ); ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <p class="description"><?php esc_html_e( 'Assign the initial KitchenIQ plan level.', 'kitchen-iq' ); ?></p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="kiq_user_password"><?php esc_html_e( 'Password', 'kitchen-iq' ); ?></label></th>
+                            <td>
+                                <input name="kiq_user_password" type="text" id="kiq_user_password" class="regular-text" />
+                                <p class="description"><?php esc_html_e( 'Leave blank to generate a secure password automatically.', 'kitchen-iq' ); ?></p>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+                <p class="submit">
+                    <button type="submit" name="kiq_create_user" class="button button-primary"><?php esc_html_e( 'Create User', 'kitchen-iq' ); ?></button>
+                </p>
+            </form>
+
+            <hr />
+
+            <h2><?php esc_html_e( 'Update User Plan', 'kitchen-iq' ); ?></h2>
+            <form method="post">
+                <?php wp_nonce_field( 'kiq_update_plan' ); ?>
+                <table class="form-table" role="presentation">
+                    <tbody>
+                        <tr>
+                            <th scope="row"><label for="kiq_existing_user"><?php esc_html_e( 'Select User', 'kitchen-iq' ); ?></label></th>
+                            <td>
+                                <select name="kiq_existing_user" id="kiq_existing_user" class="regular-text">
+                                    <option value=""><?php esc_html_e( 'Choose a user', 'kitchen-iq' ); ?></option>
+                                    <?php foreach ( $users as $user ) : ?>
+                                        <?php $user_plan = KIQ_Data::get_user_plan( $user->ID ); ?>
+                                        <option value="<?php echo esc_attr( $user->ID ); ?>">
+                                            <?php echo esc_html( sprintf( '%s (%s) - %s', $user->display_name, $user->user_email, $plan_options[ $user_plan ] ?? $user_plan ) ); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="kiq_existing_plan"><?php esc_html_e( 'Plan Level', 'kitchen-iq' ); ?></label></th>
+                            <td>
+                                <select name="kiq_existing_plan" id="kiq_existing_plan">
+                                    <?php foreach ( $plan_options as $key => $label ) : ?>
+                                        <option value="<?php echo esc_attr( $key ); ?>"><?php echo esc_html( $label ); ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <p class="description"><?php esc_html_e( 'Update the KitchenIQ plan for the selected user.', 'kitchen-iq' ); ?></p>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+                <p class="submit">
+                    <button type="submit" name="kiq_update_plan" class="button button-primary"><?php esc_html_e( 'Update Plan', 'kitchen-iq' ); ?></button>
+                </p>
+            </form>
+        </div>
+        <?php
     }
 
     public static function register_settings() {
