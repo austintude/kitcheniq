@@ -31,6 +31,9 @@ class KitchenIQDashboard {
     async init() {
         // Load user profile
         await this.loadProfile();
+
+        // Preload inventory so meal shopping lists can be accurate even before navigating to Pantry
+        await this.loadInventory();
         
         // Decide initial view from URL ?view= or fallback to onboarding/dashboard
         const params = new URLSearchParams(window.location.search);
@@ -257,6 +260,20 @@ class KitchenIQDashboard {
         const mealResultsContainer = document.getElementById('kiq-meal-results');
         if (mealResultsContainer) {
             mealResultsContainer.addEventListener('click', (e) => {
+                const addBtn = e.target.closest('[data-action="add-missing-item"]');
+                if (addBtn) {
+                    const mealIndex = parseInt(addBtn.dataset.mealIndex || '-1', 10);
+                    const itemName = addBtn.dataset.missingName;
+                    if (mealIndex >= 0 && itemName) {
+                        this.addMissingItemToPantry(mealIndex, itemName);
+                    }
+                }
+            });
+        }
+
+        const selectedIngredientsContainer = document.getElementById('kiq-selected-ingredients');
+        if (selectedIngredientsContainer) {
+            selectedIngredientsContainer.addEventListener('click', (e) => {
                 const addBtn = e.target.closest('[data-action="add-missing-item"]');
                 if (addBtn) {
                     const mealIndex = parseInt(addBtn.dataset.mealIndex || '-1', 10);
@@ -1154,7 +1171,9 @@ class KitchenIQDashboard {
     }
 
     getFilteredMissingItems(meal) {
-        const items = meal?.missing_items || [];
+        const items = (meal?.missing_items && meal.missing_items.length)
+            ? meal.missing_items
+            : this.deriveMissingFromIngredients(meal);
         const seen = new Set();
         return items.filter((entry) => {
             const normalized = this.normalizeItemName(entry.item);
@@ -1164,6 +1183,14 @@ class KitchenIQDashboard {
             seen.add(normalized);
             return true;
         });
+    }
+
+    deriveMissingFromIngredients(meal) {
+        const ingredients = meal?.ingredients_used || [];
+        return ingredients
+            .map((ing) => ing.ingredient || ing.item || ing.name || '')
+            .filter(Boolean)
+            .map((name) => ({ item: name, importance: 'needed' }));
     }
 
     cleanInstructionStep(step) {
@@ -1326,9 +1353,10 @@ class KitchenIQDashboard {
                 btn.addEventListener('click', (e) => {
                     const idx = parseInt(btn.dataset.mealIndex, 10);
                     const card = btn.closest('.kiq-meal-card');
+                    document.querySelectorAll('.kiq-meal-shopping').forEach(div => div.style.display = 'none');
                     const shoppingDiv = card?.querySelector('.kiq-meal-shopping');
                     if (shoppingDiv) {
-                        shoppingDiv.style.display = shoppingDiv.style.display === 'none' ? 'block' : 'none';
+                        shoppingDiv.style.display = 'block';
                     }
                     this.showMealIngredients(idx);
                 });
@@ -1348,13 +1376,18 @@ class KitchenIQDashboard {
 
         const ingHtml = (sel.ingredients_used || []).map(i => `<li>${i.ingredient} - ${i.quantity}</li>`).join('');
         const filteredMissing = this.getFilteredMissingItems(sel);
-        const missHtml = filteredMissing.map(m => `<li>${m.item} (${m.importance || 'needed'})</li>`).join('');
+        const missHtml = filteredMissing.map(m => `
+            <li>
+                ${m.item} (${m.importance || 'needed'})
+                <button type="button" class="btn btn-link kiq-inline-add" data-action="add-missing-item" data-meal-index="${index}" data-missing-name="${m.item}">Add to pantry</button>
+            </li>
+        `).join('');
 
         container.innerHTML = `
             <div class="kiq-selected-meal">
                 <h4>Ingredients for: ${sel.meal_name}</h4>
                 <ul>${ingHtml || '<li>No ingredients listed</li>'}</ul>
-                ${missHtml ? `<h5>Missing items</h5><ul>${missHtml}</ul>` : ''}
+                ${missHtml ? `<h5>Need to buy</h5><ul>${missHtml}</ul>` : '<p class="kiq-muted">Everything looks covered by your pantry or staples.</p>'}
             </div>
         `;
     }
