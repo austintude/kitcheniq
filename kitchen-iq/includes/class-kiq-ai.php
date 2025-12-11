@@ -524,11 +524,12 @@ class KIQ_AI {
      * Default vision prompt
      */
     private static function get_default_vision_prompt() {
-        return 'Analyze this image of a fridge, pantry, or freezer. Focus on clear, deduplicated inventory capture: ' .
-               'group identical loose items together (e.g., several tomatoes become one entry with an item_count), and avoid counting each piece separately. ' .
-               'When an item is cut, half-used, or wilted, mark its freshness_label accordingly (aging/spoiling) and reflect the fill level (quantity_estimate + package_state). ' .
-               'Differentiate beverages (sparkling water vs. soda vs. juice) and snacks; if a bag or box looks half empty, mark package_state=half_full or mostly_empty. ' .
-               'Use the schema fields: name, category, item_count (defaults to 1), quantity_estimate, package_state, freshness_label, likely_perishable, estimated_days_good, notes, confidence. ' .
-               'If multiple photos or angles might overlap, still deduplicate the list. Return concise JSON only.';
+         return 'Analyze this image of a fridge, pantry, or freezer. Capture items cleanly and deduplicated with sensible grouping rules: ' .
+             'Group homogenous produce like apples, oranges, or heads of lettuce into one entry using item_count, but DO NOT group spices, herbs, or seasonings—identify each jar/tin individually by label text (e.g., cumin, paprika, oregano). ' .
+             'Avoid generic names like "spices (various)"; prefer distinct item names whenever labels are visible. ' .
+             'When an item is cut, half-used, or wilted, set freshness_label (aging/spoiling) and reflect fill level via quantity_estimate and package_state. ' .
+             'Differentiate beverages precisely (sparkling water vs. soda vs. juice) and snacks; if a bag or box looks half empty, mark package_state=half_full or mostly_empty. ' .
+             'Use the provided schema fields: name, category, item_count (defaults to 1), quantity_estimate, package_state, freshness_label, likely_perishable, estimated_days_good, notes, confidence. ' .
+             'If multiple photos or angles overlap, still deduplicate, merging identical items only when names and packaging clearly match. Return concise JSON only.';
     }
 }

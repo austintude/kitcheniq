@@ -94,7 +94,7 @@ class KitchenIQDashboard {
                 },
             });
             const data = await response.json();
-            this.inventory = data.inventory || [];
+            this.inventory = this.postProcessInventory(data.inventory || []);
             this.renderInventory();
             if (this.mealPlan) {
                 this.renderMealPlan();
@@ -334,10 +334,26 @@ class KitchenIQDashboard {
             updatePantryBtn.addEventListener('click', () => this.showTab('inventory'));
         }
 
-        // File input for camera
+        // File input for camera (multi-photo)
         const fileInput = document.getElementById('kiq-camera-input');
         if (fileInput) {
-            fileInput.addEventListener('change', (e) => this.handleImageUpload(e));
+            fileInput.addEventListener('change', (e) => this.handleMultiImageSelect(e));
+        }
+
+        // Multi-photo gallery controls
+        const addMoreBtn = document.getElementById('kiq-add-more-photos');
+        if (addMoreBtn) {
+            addMoreBtn.addEventListener('click', () => this.triggerCameraUpload());
+        }
+
+        const clearPhotosBtn = document.getElementById('kiq-clear-photos');
+        if (clearPhotosBtn) {
+            clearPhotosBtn.addEventListener('click', () => this.clearPhotoGallery());
+        }
+
+        const scanAllBtn = document.getElementById('kiq-scan-all-photos');
+        if (scanAllBtn) {
+            scanAllBtn.addEventListener('click', () => this.scanAllPhotos());
         }
 
         // Menu toggle
@@ -939,67 +955,136 @@ class KitchenIQDashboard {
         }
     }
 
-    async handleImageUpload(e) {
-        this.showSkeleton('kiq-inventory-list', 4, 'inventory');
-        const file = e.target.files[0];
-        if (!file) return;
+    // Multi-photo gallery state
+    pendingPhotos = [];
 
-        // Show loading state
-        const btn = document.getElementById('kiq-camera-btn');
-        const originalText = btn.textContent;
-        btn.textContent = 'Processing image...';
-        btn.disabled = true;
+    handleMultiImageSelect(e) {
+        const files = Array.from(e.target.files);
+        if (!files.length) return;
 
-        try {
-            // In real implementation, upload to WordPress media library first
-            // Then get the URL to pass to AI
-            
-            // For now, use FileReader to create data URL
+        // Convert files to data URLs and add to gallery
+        files.forEach(file => {
             const reader = new FileReader();
-            reader.onload = async (event) => {
-                const imageUrl = event.target.result;
-                
-                const response = await fetch(`${this.apiRoot}kitcheniq/v1/inventory-scan`, {
-                    method: 'POST',
-                    headers: {
-                        'X-WP-Nonce': this.nonce,
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ image_url: imageUrl }),
+            reader.onload = (event) => {
+                this.pendingPhotos.push({
+                    dataUrl: event.target.result,
+                    name: file.name,
+                    id: Date.now() + Math.random()
                 });
-
-                const data = await response.json();
-                
-                // Better error handling
-                if ( !response.ok ) {
-                    const errorMsg = data.message || data.error || `Error: ${response.status}`;
-                    console.error('Inventory scan error:', response.status, data);
-                    this.showNotification(errorMsg, 'error');
-                    btn.textContent = originalText;
-                    btn.disabled = false;
-                    return;
-                }
-                
-                if (data.success) {
-                    this.inventory = data.inventory;
-                    this.hideSkeleton('kiq-inventory-list');
-                    this.renderInventory();
-                    this.showNotification(`Added ${data.items_added} items from image`, 'success');
-                } else {
-                    this.hideSkeleton('kiq-inventory-list');
-                    this.showNotification(data.error || 'Error processing image', 'error');
-                }
-
-                btn.textContent = originalText;
-                btn.disabled = false;
+                this.renderPhotoGallery();
             };
             reader.readAsDataURL(file);
-        } catch (error) {
-            console.error('Image upload error:', error);
-            this.showNotification('Error: ' + error.message, 'error');
-            btn.textContent = originalText;
-            btn.disabled = false;
+        });
+
+        // Reset input so same files can be re-selected
+        e.target.value = '';
+    }
+
+    renderPhotoGallery() {
+        const previewContainer = document.getElementById('kiq-photo-preview');
+        const gallery = document.getElementById('kiq-photo-gallery');
+        const countEl = document.getElementById('kiq-photo-count');
+
+        if (!previewContainer || !gallery) return;
+
+        if (this.pendingPhotos.length === 0) {
+            previewContainer.style.display = 'none';
+            gallery.innerHTML = '';
+            return;
         }
+
+        previewContainer.style.display = 'block';
+        countEl.textContent = this.pendingPhotos.length;
+
+        gallery.innerHTML = this.pendingPhotos.map((photo, index) => `
+            <div class="kiq-photo-item" data-photo-id="${photo.id}">
+                <img src="${photo.dataUrl}" alt="Photo ${index + 1}" />
+                <button type="button" class="kiq-photo-remove" data-photo-id="${photo.id}" aria-label="Remove photo" title="Remove photo">−</button>
+                <span class="kiq-photo-label">${index + 1}</span>
+            </div>
+        `).join('');
+
+        // Bind remove handlers
+        gallery.querySelectorAll('.kiq-photo-remove').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const photoId = parseFloat(e.target.dataset.photoId);
+                this.pendingPhotos = this.pendingPhotos.filter(p => p.id !== photoId);
+                this.renderPhotoGallery();
+            });
+        });
+    }
+
+    clearPhotoGallery() {
+        this.pendingPhotos = [];
+        this.renderPhotoGallery();
+    }
+
+    async scanAllPhotos() {
+        if (this.pendingPhotos.length === 0) {
+            this.showNotification('No photos to scan. Add some photos first.', 'error');
+            return;
+        }
+
+        this.showSkeleton('kiq-inventory-list', 4, 'inventory');
+        
+        const btn = document.getElementById('kiq-scan-all-photos');
+        const cameraBtn = document.getElementById('kiq-camera-btn');
+        const originalText = btn?.textContent || 'Scan all photos';
+        
+        if (btn) {
+            btn.textContent = `Scanning ${this.pendingPhotos.length} photos...`;
+            btn.disabled = true;
+        }
+        if (cameraBtn) cameraBtn.disabled = true;
+
+        try {
+            const imageUrls = this.pendingPhotos.map(p => p.dataUrl);
+
+            const response = await fetch(`${this.apiRoot}kitcheniq/v1/inventory-scan`, {
+                method: 'POST',
+                headers: {
+                    'X-WP-Nonce': this.nonce,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ image_urls: imageUrls }),
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                const errorMsg = data.message || data.error || `Error: ${response.status}`;
+                console.error('Multi-photo scan error:', response.status, data);
+                this.showNotification(errorMsg, 'error');
+                this.hideSkeleton('kiq-inventory-list');
+            } else if (data.success) {
+                this.inventory = this.postProcessInventory(data.inventory || []);
+                this.hideSkeleton('kiq-inventory-list');
+                this.renderInventory();
+                this.showNotification(`Added ${data.items_added} items from ${this.pendingPhotos.length} photos`, 'success');
+                this.clearPhotoGallery();
+            } else {
+                this.hideSkeleton('kiq-inventory-list');
+                this.showNotification(data.error || 'Error processing photos', 'error');
+            }
+        } catch (error) {
+            console.error('Multi-photo scan error:', error);
+            this.showNotification('Error: ' + error.message, 'error');
+            this.hideSkeleton('kiq-inventory-list');
+        } finally {
+            if (btn) {
+                btn.textContent = originalText;
+                btn.disabled = false;
+            }
+            if (cameraBtn) cameraBtn.disabled = false;
+        }
+    }
+
+    // Legacy single-image handler (kept for backwards compatibility)
+    async handleImageUpload(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        // Redirect to multi-photo flow
+        this.handleMultiImageSelect(e);
     }
 
     async generateMeals() {
@@ -1075,20 +1160,22 @@ class KitchenIQDashboard {
             return;
         }
 
-        const itemsHtml = this.inventory.map((item, idx) => `
+        const itemsHtml = this.inventory.map((item, idx) => {
+            const statusLabel = (item.status || 'fresh').toString().toLowerCase();
+            return `
             <div class="kiq-inventory-item" data-index="${idx}">
                 <div class="kiq-item-top">
                     <div>
                         <div class="kiq-item-name">${item.name || 'Unnamed item'}</div>
                         <div class="kiq-item-details">
                             <span class="kiq-category">${item.category || 'general'}</span>
-                            <span class="kiq-status ${item.status || 'fresh'}">${(item.status || 'fresh')}</span>
+                            <span class="kiq-status ${statusLabel}">${statusLabel}</span>
                         </div>
                         ${item.expiry_estimate ? `<div class="kiq-expiry">Expires: ${item.expiry_estimate}</div>` : ''}
                     </div>
                     <div class="kiq-item-actions">
                         ${item.quantity ? `<span class="kiq-pill-muted">Qty: ${item.quantity}</span>` : ''}
-                        <button type="button" class="kiq-remove-btn" data-action="remove-item" aria-label="Remove ${item.name || 'item'}">Remove</button>
+                        <button type="button" class="kiq-remove-btn" data-action="remove-item" aria-label="Remove ${item.name || 'item'}" title="Remove item">−</button>
                     </div>
                 </div>
 
@@ -1098,14 +1185,14 @@ class KitchenIQDashboard {
                     </label>
                     <label>Status
                         <select data-action="status">
-                            <option value="fresh" ${item.status === 'fresh' ? 'selected' : ''}>Fresh</option>
-                            <option value="low" ${item.status === 'low' ? 'selected' : ''}>Low</option>
-                            <option value="out" ${item.status === 'out' ? 'selected' : ''}>Out</option>
+                            <option value="fresh" ${statusLabel === 'fresh' ? 'selected' : ''}>Fresh</option>
+                            <option value="low" ${statusLabel === 'low' ? 'selected' : ''}>Low</option>
+                            <option value="out" ${statusLabel === 'out' ? 'selected' : ''}>Out</option>
                         </select>
                     </label>
                 </div>
             </div>
-        `).join('');
+        `}).join('');
 
         container.innerHTML = itemsHtml;
     }
@@ -1144,6 +1231,86 @@ class KitchenIQDashboard {
         this.inventory.splice(index, 1);
         this.saveInventory({ silent: true });
         this.renderInventory();
+    }
+
+    // Heuristic post-processing to merge duplicates and infer freshness/quantity
+    postProcessInventory(items) {
+        if (!Array.isArray(items)) return [];
+
+        const normalizeName = (name) => {
+            if (!name) return '';
+            const n = name.toLowerCase().trim();
+            // map common variants
+            const maps = [
+                [/^sparkling\s*water|^seltzer|^club\s*soda$/, 'sparkling water'],
+                [/^soda$|^pop$/, 'soft drink'],
+                [/^bbq\s*sweet\s*potato\s*chips?$/, 'sweet potato chips (bbq)'],
+                [/^cherry\s*tomatoes?$/, 'cherry tomatoes'],
+                [/^roma\s*tomatoes?$/, 'roma tomato'],
+                [/^tomatoes?$/, 'tomato'],
+            ];
+            for (const [re, val] of maps) { if (re.test(n)) return val; }
+            return n;
+        };
+
+        const inferQuantity = (name, qty) => {
+            let q = parseFloat(qty); if (isNaN(q)) q = 1;
+            const n = (name || '').toLowerCase();
+            if (/(half|1\/2)\s*tomato/.test(n)) q = Math.max(q, 0.5);
+            if (/pack|bag|box/.test(n) && q < 1) q = 1; // minimum one unit
+            // bag fullness cues
+            if (/bag.*(half|1\/2|partially|half\s*empty)/.test(n)) {
+                q = Math.min(q, 0.5);
+            }
+            return q;
+        };
+
+        const inferStatus = (name, status) => {
+            const base = (status || 'fresh').toLowerCase();
+            const n = (name || '').toLowerCase();
+            if (/(half|cut|opened|open|half\s*empty|wilt|bruised|soft)/.test(n)) {
+                return 'low';
+            }
+            return base;
+        };
+
+        // Aggregate by normalized name
+        const buckets = new Map();
+        for (const item of items) {
+            const norm = normalizeName(item.name);
+            const key = norm;
+            const qty = inferQuantity(item.name, item.quantity);
+            const status = inferStatus(item.name, item.status);
+            const category = item.category || this.mapCategory(norm);
+            const existing = buckets.get(key);
+            if (existing) {
+                existing.quantity += qty;
+                // degrade status if any are low
+                if (status === 'low') existing.status = 'low';
+            } else {
+                buckets.set(key, {
+                    name: norm || (item.name || 'item'),
+                    quantity: qty,
+                    category,
+                    status,
+                });
+            }
+        }
+
+        // Round reasonable quantities
+        return Array.from(buckets.values()).map(it => ({
+            ...it,
+            quantity: Number.isFinite(it.quantity) ? Math.round(it.quantity * 100) / 100 : 1,
+        }));
+    }
+
+    mapCategory(normName) {
+        const n = (normName || '').toLowerCase();
+        if (n.includes('sparkling water')) return 'beverages.water';
+        if (n.includes('soft drink')) return 'beverages.soda';
+        if (n.includes('chips')) return 'snacks.chips';
+        if (n.includes('tomato')) return 'produce';
+        return 'pantry';
     }
 
     normalizeItemName(name) {
