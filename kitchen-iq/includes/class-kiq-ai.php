@@ -502,9 +502,14 @@ class KIQ_AI {
                         'properties' => array(
                             'name'                => array( 'type' => 'string' ),
                             'category'            => array( 'type' => 'string' ),
+                            'item_count'          => array( 'type' => 'integer', 'minimum' => 1 ),
                             'quantity_estimate'   => array( 'type' => 'string', 'enum' => array( 'full', 'half', 'quarter', 'almost_gone' ) ),
+                            'package_state'       => array( 'type' => 'string', 'enum' => array( 'sealed', 'opened', 'half_full', 'mostly_empty' ) ),
+                            'freshness_label'     => array( 'type' => 'string', 'enum' => array( 'fresh', 'ripe', 'aging', 'spoiling', 'expired' ) ),
                             'likely_perishable'   => array( 'type' => 'boolean' ),
                             'estimated_days_good' => array( 'type' => 'integer' ),
+                            'notes'               => array( 'type' => 'string' ),
+                            'confidence'          => array( 'type' => 'number', 'minimum' => 0, 'maximum' => 1 ),
                         ),
                         'required' => array( 'name', 'category' ),
                     ),
@@ -519,8 +524,11 @@ class KIQ_AI {
      * Default vision prompt
      */
     private static function get_default_vision_prompt() {
-        return 'Analyze this image of a fridge, pantry, or freezer. Extract all visible food items and estimate their quantities and freshness. ' .
-               'For each item, guess if it\'s perishable and estimate how many days it will likely stay fresh. ' .
-               'Return results as JSON with item names, categories, quantity estimates, and perishability info.';
+        return 'Analyze this image of a fridge, pantry, or freezer. Focus on clear, deduplicated inventory capture: ' .
+               'group identical loose items together (e.g., several tomatoes become one entry with an item_count), and avoid counting each piece separately. ' .
+               'When an item is cut, half-used, or wilted, mark its freshness_label accordingly (aging/spoiling) and reflect the fill level (quantity_estimate + package_state). ' .
+               'Differentiate beverages (sparkling water vs. soda vs. juice) and snacks; if a bag or box looks half empty, mark package_state=half_full or mostly_empty. ' .
+               'Use the schema fields: name, category, item_count (defaults to 1), quantity_estimate, package_state, freshness_label, likely_perishable, estimated_days_good, notes, confidence. ' .
+               'If multiple photos or angles might overlap, still deduplicate the list. Return concise JSON only.';
     }
 }
