@@ -286,7 +286,7 @@
                 </div>
 
                 <!-- INVENTORY TAB -->
-                <div data-content="inventory" class="kiq-content">
+                <div data-content="inventory" class="kiq-content" style="display: none;">
                     <div class="kiq-section-header">
                         <div>
                             <p class="kiq-eyebrow">Pantry</p>
@@ -340,7 +340,6 @@
                                 Scan video + audio
                             </button>
                         </div>
-                    </div>
                     </div>
 
                     <!-- Multi-photo preview gallery -->
@@ -423,7 +422,7 @@
                 </div>
 
                 <!-- DASHBOARD/MEALS TAB -->
-                <div data-content="dashboard" class="kiq-content">
+                <div data-content="dashboard" class="kiq-content" style="display: none;">
                     <div class="kiq-section-header">
                         <div>
                             <p class="kiq-eyebrow">Meals</p>
@@ -486,7 +485,7 @@
                 </div>
 
                 <!-- HISTORY TAB -->
-                <div data-content="history" class="kiq-content">
+                <div data-content="history" class="kiq-content" style="display: none;">
                     <div class="kiq-section-header">
                         <div>
                             <p class="kiq-eyebrow">History</p>
@@ -502,7 +501,7 @@
                 </div>
 
                 <!-- SETTINGS TAB -->
-                <div data-content="settings" class="kiq-content">
+                <div data-content="settings" class="kiq-content" style="display: none;">
                     <div class="kiq-section-header">
                         <div>
                             <p class="kiq-eyebrow">Settings</p>

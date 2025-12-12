@@ -24,8 +24,45 @@ class KitchenIQDashboard {
             'nonstick spray',
             'water',
         ];
+
+        // PWA: register service worker (best-effort)
+        this.registerServiceWorker();
         
         this.init();
+    }
+
+    async registerServiceWorker() {
+        try {
+            if (!('serviceWorker' in navigator)) return;
+            // Service workers require secure context (HTTPS) except localhost.
+            if (!window.isSecureContext && location.hostname !== 'localhost') return;
+
+            // First, unregister any old service workers from the plugin path to avoid conflicts.
+            await this.unregisterOldServiceWorkers();
+
+            const swUrl = (kitcheniqData && kitcheniqData.pwaSw) ? kitcheniqData.pwaSw : '/app/kitcheniq-sw.js';
+            const scope = '/app/';
+
+            navigator.serviceWorker.register(swUrl, { scope });
+        } catch (e) {
+            // no-op
+        }
+    }
+
+    async unregisterOldServiceWorkers() {
+        try {
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            for (const reg of registrations) {
+                const scriptUrl = reg.active?.scriptURL || reg.waiting?.scriptURL || reg.installing?.scriptURL || '';
+                // Unregister anything not from /app/kitcheniq-sw.js
+                if (scriptUrl && !scriptUrl.includes('/app/kitcheniq-sw.js')) {
+                    await reg.unregister();
+                    console.log('Unregistered old service worker:', scriptUrl);
+                }
+            }
+        } catch (e) {
+            console.warn('Failed to unregister old service workers', e);
+        }
     }
 
     async init() {
@@ -64,8 +101,7 @@ class KitchenIQDashboard {
             // ignore if DOM not ready
         }
 
-        // Attempt to register PWA artifacts (manifest + service worker)
-        this.registerPWA();
+        // PWA registration now happens in constructor via registerServiceWorker()
     }
 
     async loadProfile() {
@@ -188,14 +224,17 @@ class KitchenIQDashboard {
         }
 
         // Top tabs delegate to sidebar if a matching side button exists, otherwise show directly
-        document.querySelectorAll('[data-tab]').forEach(btn => {
+        document.querySelectorAll('[data-tab]:not(.kiq-side-btn)').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
                 const tab = btn.dataset.tab;
+                console.log('Top nav button clicked, tab:', tab);
                 const side = document.querySelector(`.kiq-side-btn[data-tab="${tab}"]`);
                 if (side) {
+                    console.log('Found sidebar button, clicking it');
                     side.click();
                 } else {
+                    console.log('No sidebar button found, calling showTab directly');
                     this.showTab(tab);
                 }
             });
@@ -696,6 +735,42 @@ class KitchenIQDashboard {
         this._savedTimeout = setTimeout(() => el.style.display = 'none', 1800);
     }
 
+    populateFormFromProfile() {
+        if (!this.profile || Object.keys(this.profile).length === 0) return;
+        
+        try {
+            const form = document.getElementById('kiq-onboarding-form');
+            if (!form) return;
+            
+            if (this.profile.household_size) {
+                const hsInput = document.getElementById('household_size');
+                if (hsInput) hsInput.value = this.profile.household_size;
+            }
+            if (this.profile.cooking_skill) {
+                const csInput = document.getElementById('cooking_skill');
+                if (csInput) csInput.value = this.profile.cooking_skill;
+            }
+            if (this.profile.budget_level) {
+                const blInput = document.getElementById('budget_level');
+                if (blInput) blInput.value = this.profile.budget_level;
+            }
+            if (this.profile.dietary_preferences) {
+                const dpInput = document.getElementById('dietary_preferences');
+                if (dpInput) dpInput.value = this.profile.dietary_preferences;
+            }
+            if (this.profile.allergies) {
+                const aInput = document.getElementById('allergies');
+                if (aInput) aInput.value = this.profile.allergies;
+            }
+            if (this.profile.dislikes) {
+                const dInput = document.getElementById('dislikes');
+                if (dInput) dInput.value = this.profile.dislikes;
+            }
+        } catch (err) {
+            console.warn('populateFormFromProfile error:', err);
+        }
+    }
+
     updateProfileSummary() {
         try {
             const profile = this.profile || {};
@@ -826,29 +901,7 @@ class KitchenIQDashboard {
         }
     }
 
-    /* PWA registration (manifest injection + service worker) */
-    registerPWA() {
-        try {
-            const pluginUrl = (window.kitcheniqData && window.kitcheniqData.pluginUrl) ? window.kitcheniqData.pluginUrl : (typeof kitcheniqData !== 'undefined' ? kitcheniqData.pluginUrl : '');
-            if (!pluginUrl) return;
-
-            // Inject manifest link if not present
-            if (!document.querySelector('link[rel="manifest"]')) {
-                const l = document.createElement('link');
-                l.rel = 'manifest';
-                l.href = pluginUrl + 'manifest.json';
-                document.head.appendChild(l);
-            }
-
-            if ('serviceWorker' in navigator) {
-                navigator.serviceWorker.register(pluginUrl + 'service-worker.js')
-                    .then(reg => console.log('KitchenIQ service worker registered', reg))
-                    .catch(err => console.warn('KitchenIQ SW registration failed', err));
-            }
-        } catch (err) {
-            console.warn('PWA registration error', err);
-        }
-    }
+    /* Deprecated: PWA registration now handled in constructor */
 
     /* Skeleton helpers */
     showSkeleton(containerId, count = 3, type = 'card') {
@@ -869,6 +922,8 @@ class KitchenIQDashboard {
     }
 
     showTab(tabName) {
+        console.log('showTab called with:', tabName);
+        
         // Hide all tabs
         document.querySelectorAll('[data-content]').forEach(el => {
             el.style.display = 'none';
@@ -881,6 +936,7 @@ class KitchenIQDashboard {
 
         // Show selected tab
         const tabContent = document.querySelector(`[data-content="${tabName}"]`);
+        console.log('Found tab content for', tabName, ':', tabContent);
         if (tabContent) {
             tabContent.style.display = 'block';
         }
