@@ -34,6 +34,16 @@
         <symbol id="kiq-icon-spark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 3.5 13.8 8 18.5 9.8 13.8 11.6 12 16.1 10.2 11.6 5.5 9.8 10.2 8Z" />
         </symbol>
+        <symbol id="kiq-icon-video" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="5" width="14" height="14" rx="2" />
+            <path d="M16 10l6-4v12l-6-4v-4z" />
+        </symbol>
+        <symbol id="kiq-icon-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="2" width="6" height="11" rx="3" />
+            <path d="M5 10a7 7 0 0 0 14 0" />
+            <path d="M12 17v5" />
+            <path d="M8 22h8" />
+        </symbol>
     </svg>
     <header class="kiq-topbar">
         <div class="kiq-topbar-left">
@@ -291,11 +301,46 @@
                             <span class="kiq-btn-icon" aria-hidden="true"><svg class="kiq-icon"><use href="#kiq-icon-camera"></use></svg></span>
                             Scan with camera
                         </button>
-                        <button id="kiq-skip-scan-btn" class="btn btn-secondary">
+                        <button id="kiq-video-btn" class="btn btn-secondary">
+                            <span class="kiq-btn-icon" aria-hidden="true"><svg class="kiq-icon"><use href="#kiq-icon-video"></use></svg></span>
+                            Record video
+                        </button>
+                        <button id="kiq-skip-scan-btn" class="btn btn-ghost">
                             <span class="kiq-btn-icon" aria-hidden="true"><svg class="kiq-icon"><use href="#kiq-icon-arrow-right"></use></svg></span>
                             Skip & go to meals
                         </button>
                         <input type="file" id="kiq-camera-input" accept="image/*" multiple style="display: none;" />
+                        <input type="file" id="kiq-video-input" accept="video/*" capture="environment" style="display: none;" />
+                    </div>
+
+                    <!-- Video preview section -->
+                    <div id="kiq-video-preview" class="kiq-video-preview" style="display: none;">
+                        <div class="kiq-video-preview-header">
+                            <h4>
+                                <svg class="kiq-icon" aria-hidden="true"><use href="#kiq-icon-video"></use></svg>
+                                Video ready to scan
+                            </h4>
+                            <button id="kiq-clear-video" class="btn btn-ghost btn-sm">Clear</button>
+                        </div>
+                        <div class="kiq-video-container">
+                            <video id="kiq-video-player" controls muted playsinline></video>
+                        </div>
+                        <div class="kiq-video-info">
+                            <div class="kiq-video-tips">
+                                <p class="kiq-muted">
+                                    <svg class="kiq-icon" aria-hidden="true"><use href="#kiq-icon-mic"></use></svg>
+                                    <strong>Tip:</strong> Narrate what you see for better results! 
+                                    Say things like "here's my milk, some eggs, leftover chicken..."
+                                </p>
+                            </div>
+                        </div>
+                        <div class="kiq-video-submit">
+                            <button id="kiq-scan-video" class="btn btn-primary">
+                                <span class="kiq-btn-icon" aria-hidden="true"><svg class="kiq-icon"><use href="#kiq-icon-spark"></use></svg></span>
+                                Scan video + audio
+                            </button>
+                        </div>
+                    </div>
                     </div>
 
                     <!-- Multi-photo preview gallery -->
@@ -357,6 +402,17 @@
                             </div>
                         </form>
                     </div>
+
+                    <!-- Pantry Search -->
+                    <div class="kiq-search-bar">
+                        <svg class="kiq-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="11" cy="11" r="7"></circle>
+                            <path d="M21 21l-4.35-4.35"></path>
+                        </svg>
+                        <input type="text" id="kiq-pantry-search" class="kiq-search-input" placeholder="Search pantry... (e.g. 'milk', 'eggs')" autocomplete="off" />
+                        <button type="button" id="kiq-search-clear" class="kiq-search-clear" aria-label="Clear search" style="display: none;">×</button>
+                    </div>
+                    <div id="kiq-search-results-info" class="kiq-search-results-info" style="display: none;"></div>
 
                     <div id="kiq-inventory-list" class="kiq-inventory-list">
                         <div class="kiq-empty">

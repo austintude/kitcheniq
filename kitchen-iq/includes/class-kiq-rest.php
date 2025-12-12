@@ -112,8 +112,24 @@ class KIQ_REST {
                 'callback'            => array( __CLASS__, 'handle_inventory_scan' ),
                 'permission_callback' => array( __CLASS__, 'check_auth' ),
                 'args'                => array(
-                    'image_url' => array( 'type' => 'string', 'required' => true ),
+                    // Accept images and/or videos. At least one must be provided (validated in callback).
+                    'image_url'          => array( 'type' => 'string' ),
+                    'image_urls'         => array( 'type' => 'array' ),
+                    'video_url'          => array( 'type' => 'string' ),
+                    'video_urls'         => array( 'type' => 'array' ),
+                    'audio_transcription'=> array( 'type' => 'string' ),
                 ),
+            )
+        );
+
+        // Video scan (multipart upload). This is the most reliable path (avoids huge base64 JSON bodies).
+        register_rest_route(
+            'kitcheniq/v1',
+            '/inventory-scan-video',
+            array(
+                'methods'             => 'POST',
+                'callback'            => array( __CLASS__, 'handle_inventory_scan_video' ),
+                'permission_callback' => array( __CLASS__, 'check_auth' ),
             )
         );
 
@@ -139,6 +155,17 @@ class KIQ_REST {
             array(
                 'methods'             => 'GET',
                 'callback'            => array( __CLASS__, 'handle_get_usage' ),
+                'permission_callback' => array( __CLASS__, 'check_auth' ),
+            )
+        );
+
+        // Audio transcription for video scanning
+        register_rest_route(
+            'kitcheniq/v1',
+            '/transcribe-audio',
+            array(
+                'methods'             => 'POST',
+                'callback'            => array( __CLASS__, 'handle_transcribe_audio' ),
                 'permission_callback' => array( __CLASS__, 'check_auth' ),
             )
         );
@@ -477,7 +504,21 @@ class KIQ_REST {
     public static function handle_inventory_scan( $request ) {
         $user_id = get_current_user_id();
 
+        // Video scanning can take longer (ffmpeg + multiple vision calls).
+        if ( function_exists( 'set_time_limit' ) ) {
+            @set_time_limit( 180 );
+        }
+
+        $t0 = microtime( true );
+
         $params = $request->get_json_params();
+
+        // Debug logging
+        if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+            error_log( 'KIQ inventory-scan: params keys = ' . implode( ', ', array_keys( $params ?? array() ) ) );
+            error_log( 'KIQ inventory-scan: video_url length = ' . strlen( $params['video_url'] ?? '' ) );
+            error_log( 'KIQ inventory-scan: image_url length = ' . strlen( $params['image_url'] ?? '' ) );
+        }
 
         // Accept a single image_url or a batch of image_urls.
         $raw_images = array();
@@ -500,38 +541,29 @@ class KIQ_REST {
         }
 
         if ( ! empty( $video_inputs ) && ! self::is_video_scanning_enabled() ) {
+            $has_ffmpeg = self::has_ffmpeg();
             return new WP_REST_Response( array(
-                'error' => 'Video uploads are not enabled for pantry scans. Please provide still photos instead.',
+                'error'      => 'Video scanning is not available. ' . ( $has_ffmpeg ? 'Please enable it in settings.' : 'Requires ffmpeg to be installed on the server.' ),
+                'ffmpeg'     => $has_ffmpeg,
+                'suggestion' => 'Please use photo scanning instead.',
             ), 400 );
         }
 
         if ( empty( $raw_images ) && empty( $video_inputs ) ) {
             return new WP_REST_Response( array(
-                'error' => 'Missing image_url/image_urls or video_url/video_urls parameter',
+                'error'        => 'Missing image_url/image_urls or video_url/video_urls parameter',
+                'params_found' => array_keys( $params ?? array() ),
             ), 400 );
         }
 
-        $remaining_usage     = KIQ_Features::get_remaining_usage( $user_id );
-        $remaining_scans     = intval( $remaining_usage['vision_scans_remaining'] ?? 0 );
-        $max_frames_per_video = 5;
-        $requested_scans      = count( $raw_images ) + ( count( $video_inputs ) * $max_frames_per_video );
-
-        if ( $remaining_scans <= 0 ) {
-            return new WP_REST_Response( array(
-                'error'     => 'Vision scan limit reached',
-                'remaining' => $remaining_usage,
-            ), 429 );
-        }
-
-        if ( $requested_scans > $remaining_scans ) {
-            return new WP_REST_Response( array(
-                'error'     => 'Vision scan limit reached',
-                'remaining' => $remaining_usage,
-            ), 429 );
-        }
+        // Keep this small to reduce total processing time on shared hosting.
+        $max_frames_per_video = 3;
 
         // Expand video inputs into frame data URIs
         foreach ( $video_inputs as $video_url ) {
+            if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+                error_log( 'KIQ inventory-scan: extracting frames...' );
+            }
             $sanitized_video = self::sanitize_video_input( $video_url );
             if ( is_wp_error( $sanitized_video ) ) {
                 return new WP_REST_Response( array(
@@ -549,13 +581,119 @@ class KIQ_REST {
             $raw_images = array_merge( $raw_images, $frames );
         }
 
-        // Re-evaluate requested scans after frame extraction to be precise
+        // Get optional audio transcription for enhanced scanning
+        $audio_transcription = isset( $params['audio_transcription'] ) ? sanitize_textarea_field( $params['audio_transcription'] ) : '';
+
+        $resp = self::process_vision_scan_from_raw_images( $user_id, $raw_images, $audio_transcription );
+        if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+            error_log( sprintf( 'KIQ inventory-scan: complete in %.2fs', microtime( true ) - $t0 ) );
+        }
+        return $resp;
+    }
+
+    /**
+     * Handle multipart video scanning (preferred strategy).
+     * Expects a file upload field named "video".
+     */
+    public static function handle_inventory_scan_video( $request ) {
+        $user_id = get_current_user_id();
+
+        if ( function_exists( 'set_time_limit' ) ) {
+            @set_time_limit( 180 );
+        }
+
+        $t0 = microtime( true );
+
+        if ( ! self::is_video_scanning_enabled() ) {
+            $has_ffmpeg = self::has_ffmpeg();
+            return new WP_REST_Response( array(
+                'error'      => 'Video scanning is not available. ' . ( $has_ffmpeg ? 'Please enable it in settings.' : 'Requires ffmpeg to be installed on the server.' ),
+                'ffmpeg'     => $has_ffmpeg,
+                'suggestion' => 'Please use photo scanning instead.',
+            ), 400 );
+        }
+
+        $files = $request->get_file_params();
+        if ( empty( $files['video'] ) ) {
+            return new WP_REST_Response( array(
+                'error' => 'No video file provided',
+            ), 400 );
+        }
+
+        $video_file = $files['video'];
+        if ( ! isset( $video_file['error'] ) || $video_file['error'] !== UPLOAD_ERR_OK ) {
+            return new WP_REST_Response( array(
+                'error' => 'File upload error: ' . ( $video_file['error'] ?? 'unknown' ),
+            ), 400 );
+        }
+
+        // Basic validation
+        $tmp_name = $video_file['tmp_name'] ?? '';
+        if ( empty( $tmp_name ) || ! file_exists( $tmp_name ) ) {
+            return new WP_REST_Response( array(
+                'error' => 'Uploaded video file missing on server',
+            ), 400 );
+        }
+
+        if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+            error_log( sprintf( 'KIQ inventory-scan-video: received upload size=%d tmp=%s', intval( $video_file['size'] ?? 0 ), $tmp_name ) );
+        }
+
+        // Optional transcription passed in by client (from /transcribe-audio)
+        $audio_transcription = $request->get_param( 'audio_transcription' );
+        $audio_transcription = is_string( $audio_transcription ) ? sanitize_textarea_field( $audio_transcription ) : '';
+
+        $max_frames_per_video = 3;
+        if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+            error_log( 'KIQ inventory-scan-video: extracting frames...' );
+        }
+        $frames = self::extract_frames_from_video( $tmp_name, $max_frames_per_video );
+        if ( is_wp_error( $frames ) ) {
+            return new WP_REST_Response( array(
+                'error' => $frames->get_error_message(),
+            ), 400 );
+        }
+
+        if ( empty( $frames ) ) {
+            return new WP_REST_Response( array(
+                'error' => 'Unable to extract frames from video for scanning.',
+            ), 400 );
+        }
+
+        $resp = self::process_vision_scan_from_raw_images( $user_id, $frames, $audio_transcription );
+        if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+            error_log( sprintf( 'KIQ inventory-scan-video: complete in %.2fs', microtime( true ) - $t0 ) );
+        }
+        return $resp;
+    }
+
+    /**
+     * Shared implementation used by image scans and video (frame) scans.
+     */
+    private static function process_vision_scan_from_raw_images( $user_id, $raw_images, $audio_transcription = '' ) {
+        $raw_images = is_array( $raw_images ) ? array_values( array_filter( $raw_images ) ) : array();
+
+        if ( empty( $raw_images ) ) {
+            return new WP_REST_Response( array(
+                'error' => 'Missing image data',
+            ), 400 );
+        }
+
+        $remaining_usage = KIQ_Features::get_remaining_usage( $user_id );
+        $remaining_scans = intval( $remaining_usage['vision_scans_remaining'] ?? 0 );
         $requested_scans = count( $raw_images );
-        if ( $requested_scans > $remaining_scans ) {
+
+        if ( $remaining_scans <= 0 || $requested_scans > $remaining_scans ) {
             return new WP_REST_Response( array(
                 'error'     => 'Vision scan limit reached',
                 'remaining' => $remaining_usage,
             ), 429 );
+        }
+
+        if ( ! KIQ_Features::allows( $user_id, 'vision_scanning' ) ) {
+            return new WP_REST_Response( array(
+                'error' => 'Vision scanning not available on your plan',
+            ), 403 );
         }
 
         $image_urls = array();
@@ -569,17 +707,13 @@ class KIQ_REST {
             $image_urls[] = $sanitized;
         }
 
-        if ( ! KIQ_Features::allows( $user_id, 'vision_scanning' ) ) {
-            return new WP_REST_Response( array(
-                'error' => 'Vision scanning not available on your plan',
-            ), 403 );
-        }
+        $scan_results  = array();
+        $all_new_items = array();
 
-        $scan_results   = array();
-        $all_new_items  = array();
-
-        foreach ( $image_urls as $image_url ) {
-            $extraction = KIQ_AI::extract_pantry_from_image( $user_id, $image_url );
+        foreach ( $image_urls as $index => $image_url ) {
+            // Only pass audio transcription to first frame to avoid duplication
+            $transcription_for_frame = ( $index === 0 ) ? (string) $audio_transcription : '';
+            $extraction              = KIQ_AI::extract_pantry_from_image( $user_id, $image_url, $transcription_for_frame );
 
             if ( is_wp_error( $extraction ) ) {
                 return new WP_REST_Response( array(
@@ -600,10 +734,9 @@ class KIQ_REST {
         $existing_inventory = KIQ_Data::get_inventory( $user_id );
         $new_items          = $all_new_items;
 
-        // Add ID and timestamp to new items
         foreach ( $new_items as &$item ) {
-            $item['id']        = wp_rand( 100000, 999999 );
-            $item['added_at']  = current_time( 'mysql' );
+            $item['id']       = wp_rand( 100000, 999999 );
+            $item['added_at'] = current_time( 'mysql' );
             $item['category'] = $item['category'] ?? 'general';
         }
 
@@ -611,12 +744,12 @@ class KIQ_REST {
         KIQ_Data::save_inventory( $user_id, $merged_inventory );
 
         return new WP_REST_Response( array(
-            'success'       => true,
-            'items_added'   => count( $new_items ),
-            'new_items'     => $new_items,
-            'inventory'     => $merged_inventory,
-            'scan_results'  => $scan_results,
-            'remaining'     => KIQ_Features::get_remaining_usage( $user_id ),
+            'success'      => true,
+            'items_added'  => count( $new_items ),
+            'new_items'    => $new_items,
+            'inventory'    => $merged_inventory,
+            'scan_results' => $scan_results,
+            'remaining'    => KIQ_Features::get_remaining_usage( $user_id ),
         ), 200 );
     }
 
@@ -783,11 +916,27 @@ class KIQ_REST {
     }
 
     /**
-     * Validate and sanitize video URL input
+     * Validate and sanitize video URL input (data URI or URL)
      */
     private static function sanitize_video_input( $raw_video ) {
         if ( empty( $raw_video ) ) {
             return new WP_Error( 'invalid_video', 'Missing video data' );
+        }
+
+        // Handle data URIs - be flexible with video formats
+        if ( strpos( $raw_video, 'data:' ) === 0 ) {
+            // Accept any video/* MIME type
+            if ( preg_match( '#^data:video/[a-z0-9._+-]+;base64,#i', $raw_video ) ) {
+                return $raw_video;
+            }
+
+            // Log what we actually received for debugging
+            if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+                $prefix = substr( $raw_video, 0, 50 );
+                error_log( 'KIQ sanitize_video_input: data URI prefix = ' . $prefix );
+            }
+
+            return new WP_Error( 'invalid_video_format', 'Unsupported video data URI format. Expected video/* MIME type.' );
         }
 
         $video_url = esc_url_raw( $raw_video );
@@ -806,7 +955,7 @@ class KIQ_REST {
     }
 
     /**
-     * Extract up to N frames from a video URL as data URIs for vision scanning.
+     * Extract up to N frames from a video URL or data URI as data URIs for vision scanning.
      * Requires ffmpeg to be installed on the host.
      */
     private static function extract_frames_from_video( $video_url, $max_frames = 5 ) {
@@ -818,9 +967,46 @@ class KIQ_REST {
             return new WP_Error( 'ffmpeg_missing', 'Video scanning requires ffmpeg installed on the server. Please upload still photos instead.' );
         }
 
-        $tmp_file = download_url( $video_url );
-        if ( is_wp_error( $tmp_file ) || empty( $tmp_file ) ) {
-            return new WP_Error( 'video_download_failed', 'Unable to download video for scanning.' );
+        // Handle data URI - save to temp file first
+        if ( strpos( $video_url, 'data:' ) === 0 ) {
+            if ( preg_match( '#^data:video/([a-z0-9._+-]+);base64,(.+)$#is', $video_url, $matches ) ) {
+                $extension = strtolower( $matches[1] );
+                // Map MIME subtypes to file extensions
+                $ext_map = array(
+                    'quicktime' => 'mov',
+                    'x-m4v'     => 'm4v',
+                    'x-matroska' => 'mkv',
+                    '3gpp'      => '3gp',
+                );
+                if ( isset( $ext_map[ $extension ] ) ) {
+                    $extension = $ext_map[ $extension ];
+                }
+                $data = base64_decode( $matches[2] );
+                if ( $data === false ) {
+                    return new WP_Error( 'invalid_video_data', 'Could not decode video data.' );
+                }
+                $tmp_file = tempnam( get_temp_dir(), 'kiq_video_' ) . '.' . $extension;
+                file_put_contents( $tmp_file, $data );
+                
+                if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+                    error_log( 'KIQ extract_frames: saved temp file = ' . $tmp_file . ', size = ' . strlen( $data ) );
+                }
+            } else {
+                if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+                    error_log( 'KIQ extract_frames: failed to match data URI, prefix = ' . substr( $video_url, 0, 60 ) );
+                }
+                return new WP_Error( 'invalid_video_format', 'Invalid video data URI format.' );
+            }
+        } else {
+            // Local file path (e.g., uploaded tmp file) — preferred for reliability.
+            if ( file_exists( $video_url ) && is_readable( $video_url ) ) {
+                $tmp_file = $video_url;
+            } else {
+                $tmp_file = download_url( $video_url );
+                if ( is_wp_error( $tmp_file ) || empty( $tmp_file ) ) {
+                    return new WP_Error( 'video_download_failed', 'Unable to download video for scanning.' );
+                }
+            }
         }
 
         $output_dir = trailingslashit( get_temp_dir() );
@@ -844,7 +1030,10 @@ class KIQ_REST {
         $frame_files = glob( $frame_glob );
 
         if ( $exit_code !== 0 || empty( $frame_files ) ) {
-            @unlink( $tmp_file );
+            // Only unlink if we created a temp file (avoid deleting uploaded tmp_name managed by PHP)
+            if ( strpos( $video_url, 'data:' ) === 0 || filter_var( $video_url, FILTER_VALIDATE_URL ) ) {
+                @unlink( $tmp_file );
+            }
             return new WP_Error( 'video_frame_extract_failed', 'Unable to extract frames from video for scanning.' );
         }
 
@@ -857,31 +1046,47 @@ class KIQ_REST {
             @unlink( $frame_file );
         }
 
-        @unlink( $tmp_file );
+        if ( strpos( $video_url, 'data:' ) === 0 || filter_var( $video_url, FILTER_VALIDATE_URL ) ) {
+            @unlink( $tmp_file );
+        }
 
         return $frames;
     }
 
     /**
      * Determine if video scanning is enabled for this site/config.
+     * Enabled by default if ffmpeg is available.
      */
     private static function is_video_scanning_enabled() {
-        $enabled_option = get_option( 'kiq_enable_video_scanning', false );
-        $enabled_env    = getenv( 'KIQ_ENABLE_VIDEO_SCANNING' );
+        $enabled_env = getenv( 'KIQ_ENABLE_VIDEO_SCANNING' );
 
+        // Check environment variable first (allows explicit disable)
         if ( $enabled_env !== false ) {
             return filter_var( $enabled_env, FILTER_VALIDATE_BOOLEAN );
         }
 
-        return (bool) $enabled_option;
+        // Check WordPress option
+        $enabled_option = get_option( 'kiq_enable_video_scanning', null );
+        if ( $enabled_option !== null ) {
+            return (bool) $enabled_option;
+        }
+
+        // Default: enabled if ffmpeg is available
+        return self::has_ffmpeg();
     }
 
     /**
      * Check if ffmpeg is installed
      */
     private static function has_ffmpeg() {
-        $which = trim( (string) shell_exec( 'command -v ffmpeg' ) );
-        return ! empty( $which );
+        // Try Windows first
+        if ( strtoupper( substr( PHP_OS, 0, 3 ) ) === 'WIN' ) {
+            $result = trim( (string) shell_exec( 'where ffmpeg 2>nul' ) );
+        } else {
+            // Unix/Linux/Mac
+            $result = trim( (string) shell_exec( 'command -v ffmpeg 2>/dev/null' ) );
+        }
+        return ! empty( $result );
     }
 
     /**
@@ -894,6 +1099,143 @@ class KIQ_REST {
         return new WP_REST_Response( array(
             'usage' => $usage,
         ), 200 );
+    }
+
+    /**
+     * Handle audio transcription from video files using Whisper API
+     */
+    public static function handle_transcribe_audio( $request ) {
+        $user_id = get_current_user_id();
+
+        // Check if files were uploaded
+        $files = $request->get_file_params();
+        if ( empty( $files['video'] ) ) {
+            return new WP_REST_Response( array(
+                'error' => 'No video file provided',
+            ), 400 );
+        }
+
+        $video_file = $files['video'];
+
+        // Validate file
+        if ( $video_file['error'] !== UPLOAD_ERR_OK ) {
+            return new WP_REST_Response( array(
+                'error' => 'File upload error: ' . $video_file['error'],
+            ), 400 );
+        }
+
+        // Check file size (max 25MB for Whisper API)
+        $max_size = 25 * 1024 * 1024;
+        if ( $video_file['size'] > $max_size ) {
+            return new WP_REST_Response( array(
+                'error' => 'Video file too large for audio transcription. Maximum 25MB.',
+            ), 400 );
+        }
+
+        // Extract audio and transcribe using Whisper
+        $transcription = self::transcribe_video_audio( $video_file['tmp_name'] );
+
+        if ( is_wp_error( $transcription ) ) {
+            return new WP_REST_Response( array(
+                'error'         => $transcription->get_error_message(),
+                'transcription' => '',
+            ), 200 ); // Return 200 so frontend can continue with video-only scan
+        }
+
+        return new WP_REST_Response( array(
+            'success'       => true,
+            'transcription' => $transcription,
+        ), 200 );
+    }
+
+    /**
+     * Extract audio from video and transcribe using OpenAI Whisper API
+     */
+    private static function transcribe_video_audio( $video_path ) {
+        if ( ! KIQ_API_KEY || empty( KIQ_API_KEY ) ) {
+            return new WP_Error( 'missing_api_key', 'OpenAI API key not configured' );
+        }
+
+        // Check if ffmpeg is available for audio extraction
+        if ( ! self::has_ffmpeg() ) {
+            return new WP_Error( 'ffmpeg_missing', 'Audio extraction requires ffmpeg' );
+        }
+
+        // Extract audio to temporary file
+        $audio_file = tempnam( get_temp_dir(), 'kiq_audio_' ) . '.mp3';
+        $command    = sprintf(
+            'ffmpeg -hide_banner -loglevel error -i %s -vn -acodec libmp3lame -ar 16000 -ac 1 -b:a 64k %s',
+            escapeshellarg( $video_path ),
+            escapeshellarg( $audio_file )
+        );
+
+        exec( $command, $output_lines, $exit_code );
+
+        if ( $exit_code !== 0 || ! file_exists( $audio_file ) ) {
+            @unlink( $audio_file );
+            return new WP_Error( 'audio_extraction_failed', 'Could not extract audio from video' );
+        }
+
+        // Check audio file size
+        $audio_size = filesize( $audio_file );
+        if ( $audio_size < 1000 ) {
+            // Audio file too small, likely no audio track
+            @unlink( $audio_file );
+            return new WP_Error( 'no_audio', 'Video has no audio track' );
+        }
+
+        // Call Whisper API
+        $boundary = wp_generate_password( 24, false );
+        $body     = '';
+
+        // Add file
+        $body .= "--{$boundary}\r\n";
+        $body .= "Content-Disposition: form-data; name=\"file\"; filename=\"audio.mp3\"\r\n";
+        $body .= "Content-Type: audio/mpeg\r\n\r\n";
+        $body .= file_get_contents( $audio_file );
+        $body .= "\r\n";
+
+        // Add model
+        $body .= "--{$boundary}\r\n";
+        $body .= "Content-Disposition: form-data; name=\"model\"\r\n\r\n";
+        $body .= "whisper-1\r\n";
+
+        // Add prompt for better food-related transcription
+        $body .= "--{$boundary}\r\n";
+        $body .= "Content-Disposition: form-data; name=\"prompt\"\r\n\r\n";
+        $body .= "This is someone describing food items in their pantry, fridge, or freezer. They may mention grocery items, produce, beverages, condiments, and quantities.\r\n";
+
+        $body .= "--{$boundary}--\r\n";
+
+        $response = wp_remote_post(
+            'https://api.openai.com/v1/audio/transcriptions',
+            array(
+                'headers' => array(
+                    'Authorization' => 'Bearer ' . KIQ_API_KEY,
+                    'Content-Type'  => 'multipart/form-data; boundary=' . $boundary,
+                ),
+                'body'    => $body,
+                'timeout' => 60,
+            )
+        );
+
+        // Clean up audio file
+        @unlink( $audio_file );
+
+        if ( is_wp_error( $response ) ) {
+            return new WP_Error( 'whisper_api_error', $response->get_error_message() );
+        }
+
+        $status_code = wp_remote_retrieve_response_code( $response );
+        $body_text   = wp_remote_retrieve_body( $response );
+        $data        = json_decode( $body_text, true );
+
+        if ( $status_code !== 200 ) {
+            $error_msg = isset( $data['error']['message'] ) ? $data['error']['message'] : 'Whisper API error';
+            return new WP_Error( 'whisper_api_error', $error_msg );
+        }
+
+        return isset( $data['text'] ) ? trim( $data['text'] ) : '';
     }
 
     /**

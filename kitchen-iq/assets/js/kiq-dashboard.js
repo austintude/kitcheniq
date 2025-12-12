@@ -356,6 +356,34 @@ class KitchenIQDashboard {
             scanAllBtn.addEventListener('click', () => this.scanAllPhotos());
         }
 
+        // Pantry search
+        const searchInput = document.getElementById('kiq-pantry-search');
+        if (searchInput) {
+            searchInput.addEventListener('input', (e) => this.handlePantrySearch(e.target.value));
+        }
+        const searchClear = document.getElementById('kiq-search-clear');
+        if (searchClear) {
+            searchClear.addEventListener('click', () => this.clearPantrySearch());
+        }
+
+        // Video upload handlers
+        const videoBtn = document.getElementById('kiq-video-btn');
+        if (videoBtn) {
+            videoBtn.addEventListener('click', () => this.triggerVideoUpload());
+        }
+        const videoInput = document.getElementById('kiq-video-input');
+        if (videoInput) {
+            videoInput.addEventListener('change', (e) => this.handleVideoSelect(e));
+        }
+        const clearVideoBtn = document.getElementById('kiq-clear-video');
+        if (clearVideoBtn) {
+            clearVideoBtn.addEventListener('click', () => this.clearVideo());
+        }
+        const scanVideoBtn = document.getElementById('kiq-scan-video');
+        if (scanVideoBtn) {
+            scanVideoBtn.addEventListener('click', () => this.scanVideo());
+        }
+
         // Menu toggle
         const menuToggle = document.getElementById('kiq-menu-toggle');
         if (menuToggle) {
@@ -1087,6 +1115,182 @@ class KitchenIQDashboard {
         this.handleMultiImageSelect(e);
     }
 
+    // Video upload state
+    pendingVideo = null;
+    pendingVideoObjectUrl = null;
+
+    triggerVideoUpload() {
+        const videoInput = document.getElementById('kiq-video-input');
+        if (videoInput) {
+            videoInput.click();
+        }
+    }
+
+    handleVideoSelect(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        // Validate file type
+        if (!file.type.startsWith('video/')) {
+            this.showNotification('Please select a video file', 'error');
+            return;
+        }
+
+        // Check file size (max 100MB for reasonable upload)
+        const maxSizeMB = 100;
+        if (file.size > maxSizeMB * 1024 * 1024) {
+            this.showNotification(`Video must be under ${maxSizeMB}MB`, 'error');
+            return;
+        }
+
+        this.pendingVideo = file;
+
+        // Clean up any previous preview URL
+        if (this.pendingVideoObjectUrl) {
+            try { URL.revokeObjectURL(this.pendingVideoObjectUrl); } catch (e) {}
+            this.pendingVideoObjectUrl = null;
+        }
+
+        // Create object URL for preview
+        const videoUrl = URL.createObjectURL(file);
+        this.pendingVideoObjectUrl = videoUrl;
+        const videoPlayer = document.getElementById('kiq-video-player');
+        const previewContainer = document.getElementById('kiq-video-preview');
+
+        if (videoPlayer) {
+            videoPlayer.src = videoUrl;
+        }
+        if (previewContainer) {
+            previewContainer.style.display = 'block';
+        }
+
+        // Reset input for re-selection
+        e.target.value = '';
+    }
+
+    clearVideo() {
+        this.pendingVideo = null;
+        if (this.pendingVideoObjectUrl) {
+            try { URL.revokeObjectURL(this.pendingVideoObjectUrl); } catch (e) {}
+        }
+        this.pendingVideoObjectUrl = null;
+
+        const videoPlayer = document.getElementById('kiq-video-player');
+        const previewContainer = document.getElementById('kiq-video-preview');
+
+        if (videoPlayer) {
+            videoPlayer.src = '';
+        }
+        if (previewContainer) {
+            previewContainer.style.display = 'none';
+        }
+    }
+
+    async scanVideo() {
+        if (!this.pendingVideo) {
+            this.showNotification('No video selected. Record or select a video first.', 'error');
+            return;
+        }
+
+        this.showSkeleton('kiq-inventory-list', 4, 'inventory');
+
+        const btn = document.getElementById('kiq-scan-video');
+        const videoBtn = document.getElementById('kiq-video-btn');
+        const originalText = btn?.textContent || 'Scan video + audio';
+
+        if (btn) {
+            btn.textContent = 'Processing video...';
+            btn.disabled = true;
+        }
+        if (videoBtn) videoBtn.disabled = true;
+
+        try {
+            console.log('Scanning video file:', {
+                type: this.pendingVideo.type,
+                sizeMB: Math.round((this.pendingVideo.size || 0) / 1024 / 1024 * 10) / 10,
+                name: this.pendingVideo.name,
+            });
+
+            // First, upload video file for audio transcription
+            const formData = new FormData();
+            formData.append('video', this.pendingVideo);
+
+            // First transcribe the audio
+            let transcription = '';
+            try {
+                const transcribeResponse = await fetch(`${this.apiRoot}kitcheniq/v1/transcribe-audio`, {
+                    method: 'POST',
+                    headers: {
+                        'X-WP-Nonce': this.nonce,
+                    },
+                    body: formData,
+                });
+
+                if (transcribeResponse.ok) {
+                    const transcribeData = await transcribeResponse.json();
+                    transcription = transcribeData.transcription || '';
+                    if (transcription) {
+                        console.log('Audio transcription:', transcription);
+                    }
+                }
+            } catch (transcribeError) {
+                console.warn('Audio transcription failed, continuing with video frames only:', transcribeError);
+            }
+
+            // Now scan the video frames via multipart (preferred; avoids huge base64 JSON payloads)
+            const scanForm = new FormData();
+            scanForm.append('video', this.pendingVideo);
+            if (transcription) {
+                scanForm.append('audio_transcription', transcription);
+            }
+
+            const response = await fetch(`${this.apiRoot}kitcheniq/v1/inventory-scan-video`, {
+                method: 'POST',
+                headers: {
+                    'X-WP-Nonce': this.nonce,
+                },
+                body: scanForm,
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                const errorMsg = data.message || data.error || `Error: ${response.status}`;
+                console.error('Video scan error:', response.status, data);
+                // Show more details if available
+                if (data.params_found) {
+                    console.error('Params found by server:', data.params_found);
+                }
+                if (data.suggestion) {
+                    this.showNotification(`${errorMsg}. ${data.suggestion}`, 'error');
+                } else {
+                    this.showNotification(errorMsg, 'error');
+                }
+                this.hideSkeleton('kiq-inventory-list');
+            } else if (data.success) {
+                this.inventory = this.postProcessInventory(data.inventory || []);
+                this.hideSkeleton('kiq-inventory-list');
+                this.renderInventory();
+                const transcriptionNote = transcription ? ' (with audio)' : '';
+                this.showNotification(`Added ${data.items_added} items from video${transcriptionNote}`, 'success');
+                this.clearVideo();
+            } else {
+                this.hideSkeleton('kiq-inventory-list');
+                this.showNotification(data.error || 'Error processing video', 'error');
+            }
+        } catch (error) {
+            console.error('Video scan error:', error);
+            this.showNotification('Error: ' + error.message, 'error');
+            this.hideSkeleton('kiq-inventory-list');
+        } finally {
+            if (btn) {
+                btn.textContent = originalText;
+                btn.disabled = false;
+            }
+            if (videoBtn) videoBtn.disabled = false;
+        }
+    }
+
     async generateMeals() {
         return this.generateMealsWithOptions();
     }
@@ -1151,6 +1355,9 @@ class KitchenIQDashboard {
         const container = document.getElementById('kiq-inventory-list');
         if (!container) return;
 
+        const filteredItems = this.getFilteredInventory();
+        const isSearching = this.currentSearchQuery && this.currentSearchQuery.length > 0;
+
         if (!this.inventory || this.inventory.length === 0) {
             container.innerHTML = `
                 <div class="kiq-empty">
@@ -1160,10 +1367,25 @@ class KitchenIQDashboard {
             return;
         }
 
-        const itemsHtml = this.inventory.map((item, idx) => {
+        if (isSearching && filteredItems.length === 0) {
+            container.innerHTML = `
+                <div class="kiq-empty kiq-search-empty">
+                    <h3>Not in your pantry</h3>
+                    <p class="kiq-muted">No items match your search. You might need to buy this!</p>
+                </div>`;
+            return;
+        }
+
+        // Map filtered items to their original indices for proper editing/removal
+        const itemsWithIndices = filteredItems.map(item => ({
+            item,
+            originalIndex: this.inventory.indexOf(item)
+        }));
+
+        const itemsHtml = itemsWithIndices.map(({ item, originalIndex }) => {
             const statusLabel = (item.status || 'fresh').toString().toLowerCase();
             return `
-            <div class="kiq-inventory-item" data-index="${idx}">
+            <div class="kiq-inventory-item" data-index="${originalIndex}">
                 <div class="kiq-item-top">
                     <div>
                         <div class="kiq-item-name">${item.name || 'Unnamed item'}</div>
@@ -1231,6 +1453,64 @@ class KitchenIQDashboard {
         this.inventory.splice(index, 1);
         this.saveInventory({ silent: true });
         this.renderInventory();
+    }
+
+    // Pantry search state
+    currentSearchQuery = '';
+
+    handlePantrySearch(query) {
+        this.currentSearchQuery = query.trim().toLowerCase();
+        const clearBtn = document.getElementById('kiq-search-clear');
+        const resultsInfo = document.getElementById('kiq-search-results-info');
+        
+        if (clearBtn) {
+            clearBtn.style.display = this.currentSearchQuery ? 'flex' : 'none';
+        }
+
+        this.renderInventory();
+
+        // Show search results info
+        if (resultsInfo) {
+            if (this.currentSearchQuery && this.inventory?.length) {
+                const matches = this.getFilteredInventory().length;
+                const total = this.inventory.length;
+                if (matches === 0) {
+                    resultsInfo.innerHTML = `<span class="kiq-search-no-match">No items match "<strong>${this.escapeHtml(query)}</strong>"</span>`;
+                    resultsInfo.style.display = 'block';
+                } else {
+                    resultsInfo.innerHTML = `Found <strong>${matches}</strong> of ${total} items`;
+                    resultsInfo.style.display = 'block';
+                }
+            } else {
+                resultsInfo.style.display = 'none';
+            }
+        }
+    }
+
+    clearPantrySearch() {
+        const searchInput = document.getElementById('kiq-pantry-search');
+        if (searchInput) {
+            searchInput.value = '';
+        }
+        this.handlePantrySearch('');
+    }
+
+    getFilteredInventory() {
+        if (!this.inventory || !this.currentSearchQuery) {
+            return this.inventory || [];
+        }
+        const q = this.currentSearchQuery;
+        return this.inventory.filter(item => {
+            const name = (item.name || '').toLowerCase();
+            const category = (item.category || '').toLowerCase();
+            return name.includes(q) || category.includes(q);
+        });
+    }
+
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
 
     // Heuristic post-processing to merge duplicates and infer freshness/quantity

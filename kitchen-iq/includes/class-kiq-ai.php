@@ -102,15 +102,20 @@ class KIQ_AI {
 
     /**
      * Extract pantry items from image using vision
+     *
+     * @param int    $user_id           The user ID.
+     * @param string $image_url         The image URL or data URI.
+     * @param string $audio_transcription Optional audio transcription for additional context.
+     * @return array|WP_Error
      */
-    public static function extract_pantry_from_image( $user_id, $image_url ) {
+    public static function extract_pantry_from_image( $user_id, $image_url, $audio_transcription = '' ) {
         if ( ! KIQ_API_KEY || empty( KIQ_API_KEY ) ) {
             error_log( 'KitchenIQ: OpenAI API key not configured. Set KIQ_API_KEY environment variable or configure in WordPress admin (KitchenIQ → API Key).' );
             return new WP_Error( 'missing_api_key', 'OpenAI API key not configured. Please contact your site administrator.' );
         }
 
         if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-            error_log( sprintf( "KIQ: extract_pantry_from_image start - user_id=%s image_url_len=%d", intval( $user_id ), strlen( $image_url ) ) );
+            error_log( sprintf( "KIQ: extract_pantry_from_image start - user_id=%s image_url_len=%d audio_len=%d", intval( $user_id ), strlen( $image_url ), strlen( $audio_transcription ) ) );
         }
 
         // Check feature access
@@ -123,6 +128,15 @@ class KIQ_AI {
         }
 
         $vision_prompt = get_option( 'kiq_ai_vision_prompt', self::get_default_vision_prompt() );
+
+        // Enhance prompt with audio transcription if available
+        if ( ! empty( $audio_transcription ) ) {
+            $vision_prompt .= "\n\n--- AUDIO NARRATION FROM USER ---\n";
+            $vision_prompt .= "The user recorded this audio while filming their pantry/fridge. Use this additional context to identify items:\n";
+            $vision_prompt .= '"' . $audio_transcription . '"' . "\n";
+            $vision_prompt .= "Combine what you see in the image with what the user mentioned in their narration. ";
+            $vision_prompt .= "If the user mentions items you can't see clearly in the image, still include them with lower confidence.";
+        }
 
         $payload = array(
             'model'       => get_option( 'kiq_ai_vision_model', 'gpt-4o-mini' ),
@@ -188,7 +202,8 @@ class KIQ_AI {
                 'Content-Type'  => 'application/json',
             ),
             'body'    => wp_json_encode( $payload ),
-            'timeout' => 30,
+            // Vision calls can be slow on shared hosting; keep this high enough to avoid premature timeouts.
+            'timeout' => 75,
         );
 
         // Log diagnostics if debug enabled
