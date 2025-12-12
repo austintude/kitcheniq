@@ -799,11 +799,20 @@ class KIQ_REST {
     }
 
     /**
-     * Validate and sanitize video URL input
+     * Validate and sanitize video URL input (data URI or URL)
      */
     private static function sanitize_video_input( $raw_video ) {
         if ( empty( $raw_video ) ) {
             return new WP_Error( 'invalid_video', 'Missing video data' );
+        }
+
+        // Handle data URIs
+        if ( strpos( $raw_video, 'data:' ) === 0 ) {
+            if ( preg_match( '#^data:video/(mp4|webm|mov|quicktime|x-m4v);base64,#i', $raw_video ) ) {
+                return $raw_video;
+            }
+
+            return new WP_Error( 'invalid_video_format', 'Unsupported video data URI format. Use mp4, webm, or mov.' );
         }
 
         $video_url = esc_url_raw( $raw_video );
@@ -822,7 +831,7 @@ class KIQ_REST {
     }
 
     /**
-     * Extract up to N frames from a video URL as data URIs for vision scanning.
+     * Extract up to N frames from a video URL or data URI as data URIs for vision scanning.
      * Requires ffmpeg to be installed on the host.
      */
     private static function extract_frames_from_video( $video_url, $max_frames = 5 ) {
@@ -834,9 +843,27 @@ class KIQ_REST {
             return new WP_Error( 'ffmpeg_missing', 'Video scanning requires ffmpeg installed on the server. Please upload still photos instead.' );
         }
 
-        $tmp_file = download_url( $video_url );
-        if ( is_wp_error( $tmp_file ) || empty( $tmp_file ) ) {
-            return new WP_Error( 'video_download_failed', 'Unable to download video for scanning.' );
+        // Handle data URI - save to temp file first
+        if ( strpos( $video_url, 'data:' ) === 0 ) {
+            if ( preg_match( '#^data:video/([a-z0-9]+);base64,(.+)$#i', $video_url, $matches ) ) {
+                $extension = strtolower( $matches[1] );
+                if ( $extension === 'quicktime' ) {
+                    $extension = 'mov';
+                }
+                $data = base64_decode( $matches[2] );
+                if ( $data === false ) {
+                    return new WP_Error( 'invalid_video_data', 'Could not decode video data.' );
+                }
+                $tmp_file = tempnam( get_temp_dir(), 'kiq_video_' ) . '.' . $extension;
+                file_put_contents( $tmp_file, $data );
+            } else {
+                return new WP_Error( 'invalid_video_format', 'Invalid video data URI format.' );
+            }
+        } else {
+            $tmp_file = download_url( $video_url );
+            if ( is_wp_error( $tmp_file ) || empty( $tmp_file ) ) {
+                return new WP_Error( 'video_download_failed', 'Unable to download video for scanning.' );
+            }
         }
 
         $output_dir = trailingslashit( get_temp_dir() );
@@ -880,24 +907,38 @@ class KIQ_REST {
 
     /**
      * Determine if video scanning is enabled for this site/config.
+     * Enabled by default if ffmpeg is available.
      */
     private static function is_video_scanning_enabled() {
-        $enabled_option = get_option( 'kiq_enable_video_scanning', false );
-        $enabled_env    = getenv( 'KIQ_ENABLE_VIDEO_SCANNING' );
+        $enabled_env = getenv( 'KIQ_ENABLE_VIDEO_SCANNING' );
 
+        // Check environment variable first (allows explicit disable)
         if ( $enabled_env !== false ) {
             return filter_var( $enabled_env, FILTER_VALIDATE_BOOLEAN );
         }
 
-        return (bool) $enabled_option;
+        // Check WordPress option
+        $enabled_option = get_option( 'kiq_enable_video_scanning', null );
+        if ( $enabled_option !== null ) {
+            return (bool) $enabled_option;
+        }
+
+        // Default: enabled if ffmpeg is available
+        return self::has_ffmpeg();
     }
 
     /**
      * Check if ffmpeg is installed
      */
     private static function has_ffmpeg() {
-        $which = trim( (string) shell_exec( 'command -v ffmpeg' ) );
-        return ! empty( $which );
+        // Try Windows first
+        if ( strtoupper( substr( PHP_OS, 0, 3 ) ) === 'WIN' ) {
+            $result = trim( (string) shell_exec( 'where ffmpeg 2>nul' ) );
+        } else {
+            // Unix/Linux/Mac
+            $result = trim( (string) shell_exec( 'command -v ffmpeg 2>/dev/null' ) );
+        }
+        return ! empty( $result );
     }
 
     /**
