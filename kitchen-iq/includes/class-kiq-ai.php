@@ -202,7 +202,8 @@ class KIQ_AI {
                 'Content-Type'  => 'application/json',
             ),
             'body'    => wp_json_encode( $payload ),
-            'timeout' => 30,
+            // Vision calls can be slow on shared hosting; keep this high enough to avoid premature timeouts.
+            'timeout' => 75,
         );
 
         // Log diagnostics if debug enabled

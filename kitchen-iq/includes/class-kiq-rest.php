@@ -504,6 +504,13 @@ class KIQ_REST {
     public static function handle_inventory_scan( $request ) {
         $user_id = get_current_user_id();
 
+        // Video scanning can take longer (ffmpeg + multiple vision calls).
+        if ( function_exists( 'set_time_limit' ) ) {
+            @set_time_limit( 180 );
+        }
+
+        $t0 = microtime( true );
+
         $params = $request->get_json_params();
 
         // Debug logging
@@ -549,10 +556,14 @@ class KIQ_REST {
             ), 400 );
         }
 
-        $max_frames_per_video = 5;
+        // Keep this small to reduce total processing time on shared hosting.
+        $max_frames_per_video = 3;
 
         // Expand video inputs into frame data URIs
         foreach ( $video_inputs as $video_url ) {
+            if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+                error_log( 'KIQ inventory-scan: extracting frames...' );
+            }
             $sanitized_video = self::sanitize_video_input( $video_url );
             if ( is_wp_error( $sanitized_video ) ) {
                 return new WP_REST_Response( array(
@@ -573,7 +584,11 @@ class KIQ_REST {
         // Get optional audio transcription for enhanced scanning
         $audio_transcription = isset( $params['audio_transcription'] ) ? sanitize_textarea_field( $params['audio_transcription'] ) : '';
 
-        return self::process_vision_scan_from_raw_images( $user_id, $raw_images, $audio_transcription );
+        $resp = self::process_vision_scan_from_raw_images( $user_id, $raw_images, $audio_transcription );
+        if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+            error_log( sprintf( 'KIQ inventory-scan: complete in %.2fs', microtime( true ) - $t0 ) );
+        }
+        return $resp;
     }
 
     /**
@@ -582,6 +597,12 @@ class KIQ_REST {
      */
     public static function handle_inventory_scan_video( $request ) {
         $user_id = get_current_user_id();
+
+        if ( function_exists( 'set_time_limit' ) ) {
+            @set_time_limit( 180 );
+        }
+
+        $t0 = microtime( true );
 
         if ( ! self::is_video_scanning_enabled() ) {
             $has_ffmpeg = self::has_ffmpeg();
@@ -614,11 +635,18 @@ class KIQ_REST {
             ), 400 );
         }
 
+        if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+            error_log( sprintf( 'KIQ inventory-scan-video: received upload size=%d tmp=%s', intval( $video_file['size'] ?? 0 ), $tmp_name ) );
+        }
+
         // Optional transcription passed in by client (from /transcribe-audio)
         $audio_transcription = $request->get_param( 'audio_transcription' );
         $audio_transcription = is_string( $audio_transcription ) ? sanitize_textarea_field( $audio_transcription ) : '';
 
-        $max_frames_per_video = 5;
+        $max_frames_per_video = 3;
+        if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+            error_log( 'KIQ inventory-scan-video: extracting frames...' );
+        }
         $frames = self::extract_frames_from_video( $tmp_name, $max_frames_per_video );
         if ( is_wp_error( $frames ) ) {
             return new WP_REST_Response( array(
@@ -632,7 +660,11 @@ class KIQ_REST {
             ), 400 );
         }
 
-        return self::process_vision_scan_from_raw_images( $user_id, $frames, $audio_transcription );
+        $resp = self::process_vision_scan_from_raw_images( $user_id, $frames, $audio_transcription );
+        if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+            error_log( sprintf( 'KIQ inventory-scan-video: complete in %.2fs', microtime( true ) - $t0 ) );
+        }
+        return $resp;
     }
 
     /**
