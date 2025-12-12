@@ -1117,7 +1117,7 @@ class KitchenIQDashboard {
 
     // Video upload state
     pendingVideo = null;
-    pendingVideoDataUrl = null;
+    pendingVideoObjectUrl = null;
 
     triggerVideoUpload() {
         const videoInput = document.getElementById('kiq-video-input');
@@ -1145,8 +1145,15 @@ class KitchenIQDashboard {
 
         this.pendingVideo = file;
 
+        // Clean up any previous preview URL
+        if (this.pendingVideoObjectUrl) {
+            try { URL.revokeObjectURL(this.pendingVideoObjectUrl); } catch (e) {}
+            this.pendingVideoObjectUrl = null;
+        }
+
         // Create object URL for preview
         const videoUrl = URL.createObjectURL(file);
+        this.pendingVideoObjectUrl = videoUrl;
         const videoPlayer = document.getElementById('kiq-video-player');
         const previewContainer = document.getElementById('kiq-video-preview');
 
@@ -1157,20 +1164,16 @@ class KitchenIQDashboard {
             previewContainer.style.display = 'block';
         }
 
-        // Convert to data URL for API (async)
-        const reader = new FileReader();
-        reader.onload = (event) => {
-            this.pendingVideoDataUrl = event.target.result;
-        };
-        reader.readAsDataURL(file);
-
         // Reset input for re-selection
         e.target.value = '';
     }
 
     clearVideo() {
         this.pendingVideo = null;
-        this.pendingVideoDataUrl = null;
+        if (this.pendingVideoObjectUrl) {
+            try { URL.revokeObjectURL(this.pendingVideoObjectUrl); } catch (e) {}
+        }
+        this.pendingVideoObjectUrl = null;
 
         const videoPlayer = document.getElementById('kiq-video-player');
         const previewContainer = document.getElementById('kiq-video-preview');
@@ -1202,10 +1205,13 @@ class KitchenIQDashboard {
         if (videoBtn) videoBtn.disabled = true;
 
         try {
-            // First, upload video to get a URL the server can access
-            // For now, we'll send the data URL directly
-            // In production, you'd upload to WordPress media library first
+            console.log('Scanning video file:', {
+                type: this.pendingVideo.type,
+                sizeMB: Math.round((this.pendingVideo.size || 0) / 1024 / 1024 * 10) / 10,
+                name: this.pendingVideo.name,
+            });
 
+            // First, upload video file for audio transcription
             const formData = new FormData();
             formData.append('video', this.pendingVideo);
 
@@ -1231,17 +1237,19 @@ class KitchenIQDashboard {
                 console.warn('Audio transcription failed, continuing with video frames only:', transcribeError);
             }
 
-            // Now scan the video frames with optional transcription context
-            const response = await fetch(`${this.apiRoot}kitcheniq/v1/inventory-scan`, {
+            // Now scan the video frames via multipart (preferred; avoids huge base64 JSON payloads)
+            const scanForm = new FormData();
+            scanForm.append('video', this.pendingVideo);
+            if (transcription) {
+                scanForm.append('audio_transcription', transcription);
+            }
+
+            const response = await fetch(`${this.apiRoot}kitcheniq/v1/inventory-scan-video`, {
                 method: 'POST',
                 headers: {
                     'X-WP-Nonce': this.nonce,
-                    'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({
-                    video_url: this.pendingVideoDataUrl,
-                    audio_transcription: transcription,
-                }),
+                body: scanForm,
             });
 
             const data = await response.json();
@@ -1249,7 +1257,15 @@ class KitchenIQDashboard {
             if (!response.ok) {
                 const errorMsg = data.message || data.error || `Error: ${response.status}`;
                 console.error('Video scan error:', response.status, data);
-                this.showNotification(errorMsg, 'error');
+                // Show more details if available
+                if (data.params_found) {
+                    console.error('Params found by server:', data.params_found);
+                }
+                if (data.suggestion) {
+                    this.showNotification(`${errorMsg}. ${data.suggestion}`, 'error');
+                } else {
+                    this.showNotification(errorMsg, 'error');
+                }
                 this.hideSkeleton('kiq-inventory-list');
             } else if (data.success) {
                 this.inventory = this.postProcessInventory(data.inventory || []);
