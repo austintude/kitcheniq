@@ -366,6 +366,24 @@ class KitchenIQDashboard {
             searchClear.addEventListener('click', () => this.clearPantrySearch());
         }
 
+        // Video upload handlers
+        const videoBtn = document.getElementById('kiq-video-btn');
+        if (videoBtn) {
+            videoBtn.addEventListener('click', () => this.triggerVideoUpload());
+        }
+        const videoInput = document.getElementById('kiq-video-input');
+        if (videoInput) {
+            videoInput.addEventListener('change', (e) => this.handleVideoSelect(e));
+        }
+        const clearVideoBtn = document.getElementById('kiq-clear-video');
+        if (clearVideoBtn) {
+            clearVideoBtn.addEventListener('click', () => this.clearVideo());
+        }
+        const scanVideoBtn = document.getElementById('kiq-scan-video');
+        if (scanVideoBtn) {
+            scanVideoBtn.addEventListener('click', () => this.scanVideo());
+        }
+
         // Menu toggle
         const menuToggle = document.getElementById('kiq-menu-toggle');
         if (menuToggle) {
@@ -1095,6 +1113,166 @@ class KitchenIQDashboard {
         if (!file) return;
         // Redirect to multi-photo flow
         this.handleMultiImageSelect(e);
+    }
+
+    // Video upload state
+    pendingVideo = null;
+    pendingVideoDataUrl = null;
+
+    triggerVideoUpload() {
+        const videoInput = document.getElementById('kiq-video-input');
+        if (videoInput) {
+            videoInput.click();
+        }
+    }
+
+    handleVideoSelect(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        // Validate file type
+        if (!file.type.startsWith('video/')) {
+            this.showNotification('Please select a video file', 'error');
+            return;
+        }
+
+        // Check file size (max 100MB for reasonable upload)
+        const maxSizeMB = 100;
+        if (file.size > maxSizeMB * 1024 * 1024) {
+            this.showNotification(`Video must be under ${maxSizeMB}MB`, 'error');
+            return;
+        }
+
+        this.pendingVideo = file;
+
+        // Create object URL for preview
+        const videoUrl = URL.createObjectURL(file);
+        const videoPlayer = document.getElementById('kiq-video-player');
+        const previewContainer = document.getElementById('kiq-video-preview');
+
+        if (videoPlayer) {
+            videoPlayer.src = videoUrl;
+        }
+        if (previewContainer) {
+            previewContainer.style.display = 'block';
+        }
+
+        // Convert to data URL for API (async)
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            this.pendingVideoDataUrl = event.target.result;
+        };
+        reader.readAsDataURL(file);
+
+        // Reset input for re-selection
+        e.target.value = '';
+    }
+
+    clearVideo() {
+        this.pendingVideo = null;
+        this.pendingVideoDataUrl = null;
+
+        const videoPlayer = document.getElementById('kiq-video-player');
+        const previewContainer = document.getElementById('kiq-video-preview');
+
+        if (videoPlayer) {
+            videoPlayer.src = '';
+        }
+        if (previewContainer) {
+            previewContainer.style.display = 'none';
+        }
+    }
+
+    async scanVideo() {
+        if (!this.pendingVideo) {
+            this.showNotification('No video selected. Record or select a video first.', 'error');
+            return;
+        }
+
+        this.showSkeleton('kiq-inventory-list', 4, 'inventory');
+
+        const btn = document.getElementById('kiq-scan-video');
+        const videoBtn = document.getElementById('kiq-video-btn');
+        const originalText = btn?.textContent || 'Scan video + audio';
+
+        if (btn) {
+            btn.textContent = 'Processing video...';
+            btn.disabled = true;
+        }
+        if (videoBtn) videoBtn.disabled = true;
+
+        try {
+            // First, upload video to get a URL the server can access
+            // For now, we'll send the data URL directly
+            // In production, you'd upload to WordPress media library first
+
+            const formData = new FormData();
+            formData.append('video', this.pendingVideo);
+
+            // First transcribe the audio
+            let transcription = '';
+            try {
+                const transcribeResponse = await fetch(`${this.apiRoot}kitcheniq/v1/transcribe-audio`, {
+                    method: 'POST',
+                    headers: {
+                        'X-WP-Nonce': this.nonce,
+                    },
+                    body: formData,
+                });
+
+                if (transcribeResponse.ok) {
+                    const transcribeData = await transcribeResponse.json();
+                    transcription = transcribeData.transcription || '';
+                    if (transcription) {
+                        console.log('Audio transcription:', transcription);
+                    }
+                }
+            } catch (transcribeError) {
+                console.warn('Audio transcription failed, continuing with video frames only:', transcribeError);
+            }
+
+            // Now scan the video frames with optional transcription context
+            const response = await fetch(`${this.apiRoot}kitcheniq/v1/inventory-scan`, {
+                method: 'POST',
+                headers: {
+                    'X-WP-Nonce': this.nonce,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    video_url: this.pendingVideoDataUrl,
+                    audio_transcription: transcription,
+                }),
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                const errorMsg = data.message || data.error || `Error: ${response.status}`;
+                console.error('Video scan error:', response.status, data);
+                this.showNotification(errorMsg, 'error');
+                this.hideSkeleton('kiq-inventory-list');
+            } else if (data.success) {
+                this.inventory = this.postProcessInventory(data.inventory || []);
+                this.hideSkeleton('kiq-inventory-list');
+                this.renderInventory();
+                const transcriptionNote = transcription ? ' (with audio)' : '';
+                this.showNotification(`Added ${data.items_added} items from video${transcriptionNote}`, 'success');
+                this.clearVideo();
+            } else {
+                this.hideSkeleton('kiq-inventory-list');
+                this.showNotification(data.error || 'Error processing video', 'error');
+            }
+        } catch (error) {
+            console.error('Video scan error:', error);
+            this.showNotification('Error: ' + error.message, 'error');
+            this.hideSkeleton('kiq-inventory-list');
+        } finally {
+            if (btn) {
+                btn.textContent = originalText;
+                btn.disabled = false;
+            }
+            if (videoBtn) videoBtn.disabled = false;
+        }
     }
 
     async generateMeals() {

@@ -143,6 +143,17 @@ class KIQ_REST {
             )
         );
 
+        // Audio transcription for video scanning
+        register_rest_route(
+            'kitcheniq/v1',
+            '/transcribe-audio',
+            array(
+                'methods'             => 'POST',
+                'callback'            => array( __CLASS__, 'handle_transcribe_audio' ),
+                'permission_callback' => array( __CLASS__, 'check_auth' ),
+            )
+        );
+
         // Diagnostic endpoint (public for anyone to see)
         register_rest_route(
             'kitcheniq/v1',
@@ -575,11 +586,16 @@ class KIQ_REST {
             ), 403 );
         }
 
+        // Get optional audio transcription for enhanced scanning
+        $audio_transcription = isset( $params['audio_transcription'] ) ? sanitize_textarea_field( $params['audio_transcription'] ) : '';
+
         $scan_results   = array();
         $all_new_items  = array();
 
-        foreach ( $image_urls as $image_url ) {
-            $extraction = KIQ_AI::extract_pantry_from_image( $user_id, $image_url );
+        foreach ( $image_urls as $index => $image_url ) {
+            // Only pass audio transcription to first frame to avoid duplication
+            $transcription_for_frame = ( $index === 0 ) ? $audio_transcription : '';
+            $extraction = KIQ_AI::extract_pantry_from_image( $user_id, $image_url, $transcription_for_frame );
 
             if ( is_wp_error( $extraction ) ) {
                 return new WP_REST_Response( array(
@@ -894,6 +910,143 @@ class KIQ_REST {
         return new WP_REST_Response( array(
             'usage' => $usage,
         ), 200 );
+    }
+
+    /**
+     * Handle audio transcription from video files using Whisper API
+     */
+    public static function handle_transcribe_audio( $request ) {
+        $user_id = get_current_user_id();
+
+        // Check if files were uploaded
+        $files = $request->get_file_params();
+        if ( empty( $files['video'] ) ) {
+            return new WP_REST_Response( array(
+                'error' => 'No video file provided',
+            ), 400 );
+        }
+
+        $video_file = $files['video'];
+
+        // Validate file
+        if ( $video_file['error'] !== UPLOAD_ERR_OK ) {
+            return new WP_REST_Response( array(
+                'error' => 'File upload error: ' . $video_file['error'],
+            ), 400 );
+        }
+
+        // Check file size (max 25MB for Whisper API)
+        $max_size = 25 * 1024 * 1024;
+        if ( $video_file['size'] > $max_size ) {
+            return new WP_REST_Response( array(
+                'error' => 'Video file too large for audio transcription. Maximum 25MB.',
+            ), 400 );
+        }
+
+        // Extract audio and transcribe using Whisper
+        $transcription = self::transcribe_video_audio( $video_file['tmp_name'] );
+
+        if ( is_wp_error( $transcription ) ) {
+            return new WP_REST_Response( array(
+                'error'         => $transcription->get_error_message(),
+                'transcription' => '',
+            ), 200 ); // Return 200 so frontend can continue with video-only scan
+        }
+
+        return new WP_REST_Response( array(
+            'success'       => true,
+            'transcription' => $transcription,
+        ), 200 );
+    }
+
+    /**
+     * Extract audio from video and transcribe using OpenAI Whisper API
+     */
+    private static function transcribe_video_audio( $video_path ) {
+        if ( ! KIQ_API_KEY || empty( KIQ_API_KEY ) ) {
+            return new WP_Error( 'missing_api_key', 'OpenAI API key not configured' );
+        }
+
+        // Check if ffmpeg is available for audio extraction
+        if ( ! self::has_ffmpeg() ) {
+            return new WP_Error( 'ffmpeg_missing', 'Audio extraction requires ffmpeg' );
+        }
+
+        // Extract audio to temporary file
+        $audio_file = tempnam( get_temp_dir(), 'kiq_audio_' ) . '.mp3';
+        $command    = sprintf(
+            'ffmpeg -hide_banner -loglevel error -i %s -vn -acodec libmp3lame -ar 16000 -ac 1 -b:a 64k %s',
+            escapeshellarg( $video_path ),
+            escapeshellarg( $audio_file )
+        );
+
+        exec( $command, $output_lines, $exit_code );
+
+        if ( $exit_code !== 0 || ! file_exists( $audio_file ) ) {
+            @unlink( $audio_file );
+            return new WP_Error( 'audio_extraction_failed', 'Could not extract audio from video' );
+        }
+
+        // Check audio file size
+        $audio_size = filesize( $audio_file );
+        if ( $audio_size < 1000 ) {
+            // Audio file too small, likely no audio track
+            @unlink( $audio_file );
+            return new WP_Error( 'no_audio', 'Video has no audio track' );
+        }
+
+        // Call Whisper API
+        $boundary = wp_generate_password( 24, false );
+        $body     = '';
+
+        // Add file
+        $body .= "--{$boundary}\r\n";
+        $body .= "Content-Disposition: form-data; name=\"file\"; filename=\"audio.mp3\"\r\n";
+        $body .= "Content-Type: audio/mpeg\r\n\r\n";
+        $body .= file_get_contents( $audio_file );
+        $body .= "\r\n";
+
+        // Add model
+        $body .= "--{$boundary}\r\n";
+        $body .= "Content-Disposition: form-data; name=\"model\"\r\n\r\n";
+        $body .= "whisper-1\r\n";
+
+        // Add prompt for better food-related transcription
+        $body .= "--{$boundary}\r\n";
+        $body .= "Content-Disposition: form-data; name=\"prompt\"\r\n\r\n";
+        $body .= "This is someone describing food items in their pantry, fridge, or freezer. They may mention grocery items, produce, beverages, condiments, and quantities.\r\n";
+
+        $body .= "--{$boundary}--\r\n";
+
+        $response = wp_remote_post(
+            'https://api.openai.com/v1/audio/transcriptions',
+            array(
+                'headers' => array(
+                    'Authorization' => 'Bearer ' . KIQ_API_KEY,
+                    'Content-Type'  => 'multipart/form-data; boundary=' . $boundary,
+                ),
+                'body'    => $body,
+                'timeout' => 60,
+            )
+        );
+
+        // Clean up audio file
+        @unlink( $audio_file );
+
+        if ( is_wp_error( $response ) ) {
+            return new WP_Error( 'whisper_api_error', $response->get_error_message() );
+        }
+
+        $status_code = wp_remote_retrieve_response_code( $response );
+        $body_text   = wp_remote_retrieve_body( $response );
+        $data        = json_decode( $body_text, true );
+
+        if ( $status_code !== 200 ) {
+            $error_msg = isset( $data['error']['message'] ) ? $data['error']['message'] : 'Whisper API error';
+            return new WP_Error( 'whisper_api_error', $error_msg );
+        }
+
+        return isset( $data['text'] ) ? trim( $data['text'] ) : '';
     }
 
     /**
