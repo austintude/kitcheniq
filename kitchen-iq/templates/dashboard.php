@@ -358,6 +358,17 @@
                         </form>
                     </div>
 
+                    <!-- Pantry Search -->
+                    <div class="kiq-search-bar">
+                        <svg class="kiq-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="11" cy="11" r="7"></circle>
+                            <path d="M21 21l-4.35-4.35"></path>
+                        </svg>
+                        <input type="text" id="kiq-pantry-search" class="kiq-search-input" placeholder="Search pantry... (e.g. 'milk', 'eggs')" autocomplete="off" />
+                        <button type="button" id="kiq-search-clear" class="kiq-search-clear" aria-label="Clear search" style="display: none;">×</button>
+                    </div>
+                    <div id="kiq-search-results-info" class="kiq-search-results-info" style="display: none;"></div>
+
                     <div id="kiq-inventory-list" class="kiq-inventory-list">
                         <div class="kiq-empty">
                             <h3>No items yet</h3>

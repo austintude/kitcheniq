@@ -356,6 +356,16 @@ class KitchenIQDashboard {
             scanAllBtn.addEventListener('click', () => this.scanAllPhotos());
         }
 
+        // Pantry search
+        const searchInput = document.getElementById('kiq-pantry-search');
+        if (searchInput) {
+            searchInput.addEventListener('input', (e) => this.handlePantrySearch(e.target.value));
+        }
+        const searchClear = document.getElementById('kiq-search-clear');
+        if (searchClear) {
+            searchClear.addEventListener('click', () => this.clearPantrySearch());
+        }
+
         // Menu toggle
         const menuToggle = document.getElementById('kiq-menu-toggle');
         if (menuToggle) {
@@ -1151,6 +1161,9 @@ class KitchenIQDashboard {
         const container = document.getElementById('kiq-inventory-list');
         if (!container) return;
 
+        const filteredItems = this.getFilteredInventory();
+        const isSearching = this.currentSearchQuery && this.currentSearchQuery.length > 0;
+
         if (!this.inventory || this.inventory.length === 0) {
             container.innerHTML = `
                 <div class="kiq-empty">
@@ -1160,10 +1173,25 @@ class KitchenIQDashboard {
             return;
         }
 
-        const itemsHtml = this.inventory.map((item, idx) => {
+        if (isSearching && filteredItems.length === 0) {
+            container.innerHTML = `
+                <div class="kiq-empty kiq-search-empty">
+                    <h3>Not in your pantry</h3>
+                    <p class="kiq-muted">No items match your search. You might need to buy this!</p>
+                </div>`;
+            return;
+        }
+
+        // Map filtered items to their original indices for proper editing/removal
+        const itemsWithIndices = filteredItems.map(item => ({
+            item,
+            originalIndex: this.inventory.indexOf(item)
+        }));
+
+        const itemsHtml = itemsWithIndices.map(({ item, originalIndex }) => {
             const statusLabel = (item.status || 'fresh').toString().toLowerCase();
             return `
-            <div class="kiq-inventory-item" data-index="${idx}">
+            <div class="kiq-inventory-item" data-index="${originalIndex}">
                 <div class="kiq-item-top">
                     <div>
                         <div class="kiq-item-name">${item.name || 'Unnamed item'}</div>
@@ -1231,6 +1259,64 @@ class KitchenIQDashboard {
         this.inventory.splice(index, 1);
         this.saveInventory({ silent: true });
         this.renderInventory();
+    }
+
+    // Pantry search state
+    currentSearchQuery = '';
+
+    handlePantrySearch(query) {
+        this.currentSearchQuery = query.trim().toLowerCase();
+        const clearBtn = document.getElementById('kiq-search-clear');
+        const resultsInfo = document.getElementById('kiq-search-results-info');
+        
+        if (clearBtn) {
+            clearBtn.style.display = this.currentSearchQuery ? 'flex' : 'none';
+        }
+
+        this.renderInventory();
+
+        // Show search results info
+        if (resultsInfo) {
+            if (this.currentSearchQuery && this.inventory?.length) {
+                const matches = this.getFilteredInventory().length;
+                const total = this.inventory.length;
+                if (matches === 0) {
+                    resultsInfo.innerHTML = `<span class="kiq-search-no-match">No items match "<strong>${this.escapeHtml(query)}</strong>"</span>`;
+                    resultsInfo.style.display = 'block';
+                } else {
+                    resultsInfo.innerHTML = `Found <strong>${matches}</strong> of ${total} items`;
+                    resultsInfo.style.display = 'block';
+                }
+            } else {
+                resultsInfo.style.display = 'none';
+            }
+        }
+    }
+
+    clearPantrySearch() {
+        const searchInput = document.getElementById('kiq-pantry-search');
+        if (searchInput) {
+            searchInput.value = '';
+        }
+        this.handlePantrySearch('');
+    }
+
+    getFilteredInventory() {
+        if (!this.inventory || !this.currentSearchQuery) {
+            return this.inventory || [];
+        }
+        const q = this.currentSearchQuery;
+        return this.inventory.filter(item => {
+            const name = (item.name || '').toLowerCase();
+            const category = (item.category || '').toLowerCase();
+            return name.includes(q) || category.includes(q);
+        });
+    }
+
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
 
     // Heuristic post-processing to merge duplicates and infer freshness/quantity
