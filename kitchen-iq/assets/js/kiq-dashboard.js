@@ -1049,37 +1049,58 @@ class KitchenIQDashboard {
         try {
             this.ensureLiveElements();
             if (!navigator.mediaDevices?.getUserMedia) {
-                this.setLiveStatus('Camera not supported');
+                this.setLiveStatus('Camera not supported on this device');
                 return;
             }
             this.setLiveStatus('Requesting camera...');
             
-            // Request rear (environment) camera by default, fall back to any camera
+            let stream = null;
+            
+            // Note: We do NOT request audio from getUserMedia here.
+            // Web Speech API accesses the microphone independently and may conflict
+            // if both try to use the same audio device. We only need video for frame capture.
             const constraints = {
                 video: { 
                     facingMode: this.liveUsingRearCamera ? 'environment' : 'user',
                     width: { ideal: 1280 },
                     height: { ideal: 720 }
-                },
-                audio: true // Enable audio for unified flow
+                }
             };
             
             try {
-                this.liveStream = await navigator.mediaDevices.getUserMedia(constraints);
-            } catch (err) {
-                // Fallback if facingMode not supported
-                console.warn('FacingMode not supported, requesting any camera', err);
-                this.liveStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+                console.log('Camera stream obtained (audio handled separately by Web Speech API)');
+            } catch (err1) {
+                console.warn('Failed with facingMode, trying without constraint', err1);
+                // Fallback: Try video without facingMode
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({ 
+                        video: { width: { ideal: 1280 }, height: { ideal: 720 } }
+                    });
+                    console.log('Camera stream obtained (fallback, no facingMode)');
+                } catch (err2) {
+                    // Complete failure
+                    console.error('Camera request failed', err2);
+                    throw err2;
+                }
             }
             
+            if (!stream) {
+                this.setLiveStatus('Unable to access camera');
+                return;
+            }
+            
+            this.liveStream = stream;
+            
             if (this.liveVideoEl) {
-                this.liveVideoEl.srcObject = this.liveStream;
+                this.liveVideoEl.srcObject = stream;
                 await this.liveVideoEl.play();
             }
             
             this.liveSessionActive = true;
             this.liveRecognizing = false;
-            this.setLiveStatus('Camera on. Click "Talk" to start speaking.');
+            
+            this.setLiveStatus('Camera ready. Click "Talk" to start speaking.');
             
             // Update button text
             const startBtn = document.getElementById('kiq-live-start');
@@ -1089,9 +1110,18 @@ class KitchenIQDashboard {
             }
             
         } catch (err) {
-            console.error('Live session error', err);
+            console.error('Live session error:', err);
             this.liveSessionActive = false;
-            const errorMsg = err.name === 'NotAllowedError' ? 'Camera/mic blocked' : 'Camera/mic unavailable';
+            
+            let errorMsg = 'Camera unavailable';
+            if (err.name === 'NotAllowedError') {
+                errorMsg = 'Permission denied. Check browser camera settings.';
+            } else if (err.name === 'NotFoundError') {
+                errorMsg = 'No camera device found';
+            } else if (err.name === 'NotReadableError') {
+                errorMsg = 'Camera is in use by another app';
+            }
+            
             this.setLiveStatus(errorMsg);
         }
     }
@@ -1193,7 +1223,7 @@ class KitchenIQDashboard {
                 }
                 this.setLiveStatus('Processing Coach response...');
             } catch (e) {
-                // ignore
+                console.error('Error stopping recognition:', e);
             }
             this.liveRecognizing = false;
             return;
@@ -1201,7 +1231,8 @@ class KitchenIQDashboard {
 
         // Fallback to text prompt if speech recognition is unavailable
         if (!Recognition) {
-            const transcript = window.prompt('Type your request for KIQ Coach');
+            console.warn('SpeechRecognition API not available');
+            const transcript = window.prompt('Speech recognition not supported. Type your request for KIQ Coach:');
             if (transcript) {
                 await this.sendLiveAssist(transcript);
             }
@@ -1219,6 +1250,8 @@ class KitchenIQDashboard {
             this.liveRecognizer = recognizer;
             this.setLiveStatus('Listening... (click again to stop)');
             
+            console.log('Speech recognition started');
+            
             // Update button state
             const talkBtn = document.getElementById('kiq-live-ptt');
             if (talkBtn) {
@@ -1231,12 +1264,17 @@ class KitchenIQDashboard {
                 await this.captureLiveFrame();
             }, 8000);
 
+            recognizer.onstart = () => {
+                console.log('Speech recognition onstart event fired');
+            };
+
             recognizer.onresult = (event) => {
+                console.log('onresult event:', event.results.length, 'results, isFinal:', event.results[event.results.length - 1]?.isFinal);
                 let interim = '';
                 for (let i = event.resultIndex; i < event.results.length; i++) {
                     const result = event.results[i];
                     if (result.isFinal) {
-                        finalTranscript += result[0].transcript;
+                        finalTranscript += result[0].transcript + ' ';
                     } else {
                         interim += result[0].transcript;
                     }
@@ -1248,13 +1286,25 @@ class KitchenIQDashboard {
             };
 
             recognizer.onerror = (event) => {
+                console.error('Speech recognition error:', event.error);
                 this.liveRecognizing = false;
                 if (this.liveAutoFrameInterval) {
                     clearInterval(this.liveAutoFrameInterval);
                     this.liveAutoFrameInterval = null;
                 }
-                const blocked = event.error === 'not-allowed' || event.error === 'service-not-allowed';
-                this.setLiveStatus(blocked ? 'Mic blocked - enable in browser settings' : 'Mic error');
+                
+                let errorMsg = 'Microphone error';
+                if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+                    errorMsg = 'Mic blocked - enable in browser settings';
+                } else if (event.error === 'network') {
+                    errorMsg = 'Network error - check connection';
+                } else if (event.error === 'no-speech') {
+                    errorMsg = 'No speech detected - try again';
+                } else if (event.error === 'audio-capture') {
+                    errorMsg = 'Mic not accessible - check permissions';
+                }
+                
+                this.setLiveStatus(errorMsg);
                 const talkBtn = document.getElementById('kiq-live-ptt');
                 if (talkBtn) {
                     talkBtn.classList.remove('listening');
@@ -1263,6 +1313,7 @@ class KitchenIQDashboard {
             };
 
             recognizer.onend = async () => {
+                console.log('Speech recognition onend event, finalTranscript:', finalTranscript);
                 const text = (finalTranscript || '').trim();
                 this.liveRecognizing = false;
                 if (this.liveAutoFrameInterval) {
@@ -1275,7 +1326,7 @@ class KitchenIQDashboard {
                     talkBtn.textContent = 'Talk to KitchenIQ Coach';
                 }
                 if (!text) {
-                    this.setLiveStatus('No audio captured - try again');
+                    this.setLiveStatus('No speech detected - try again');
                     return;
                 }
                 this.setLiveStatus('Sending to Coach...');
@@ -1285,10 +1336,11 @@ class KitchenIQDashboard {
             };
 
             recognizer.start();
+            console.log('Recognition.start() called');
         } catch (err) {
-            console.error('Speech recognition failed', err);
+            console.error('Speech recognition exception:', err);
             this.liveRecognizing = false;
-            const transcript = window.prompt('Type your request for KIQ Coach');
+            const transcript = window.prompt('Error with speech recognition. Type your request for KIQ Coach:');
             if (transcript) {
                 await this.sendLiveAssist(transcript);
             }
@@ -1299,25 +1351,40 @@ class KitchenIQDashboard {
         // Use latest captured frame if not provided
         const frame = frameDataUrl || this.liveLatestFrame || '';
         
+        console.log('sendLiveAssist called - transcript length:', transcript?.length, 'frame length:', frame?.length);
+        
         this.setLiveStatus('Sending to Coach...');
         this.appendLiveMessage('You', transcript || '(frame sent)');
         try {
+            const payload = { transcript: transcript || '', frame_jpeg: frame };
+            console.log('Sending payload to /live-assist:', { 
+                transcriptLength: payload.transcript.length, 
+                frameLength: payload.frame_jpeg.length 
+            });
+            
             const res = await fetch(`${this.apiRoot}kitcheniq/v1/live-assist`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'X-WP-Nonce': this.nonce,
                 },
-                body: JSON.stringify({ transcript: transcript || '', frame_jpeg: frame }),
+                body: JSON.stringify(payload),
             });
+            
+            console.log('Response status:', res.status, 'ok:', res.ok);
+            
             const data = await res.json();
+            console.log('Response data:', data);
+            
             if (!res.ok || data.error) {
                 const msg = data.message || data.error || 'Coach failed to respond';
+                console.error('Coach error response:', msg);
                 this.setLiveStatus(msg);
                 this.appendLiveMessage('Coach', msg);
                 return;
             }
             const msg = data.message || 'Received';
+            console.log('Coach message:', msg);
             this.appendLiveMessage('Coach', msg);
             
             // Optionally play TTS if enabled
@@ -1328,6 +1395,7 @@ class KitchenIQDashboard {
                     utterance.pitch = 1.0;
                     speechSynthesis.cancel(); // Clear any pending utterances
                     speechSynthesis.speak(utterance);
+                    console.log('TTS playback started');
                 } catch (err) {
                     console.warn('TTS failed', err);
                 }
@@ -1335,7 +1403,7 @@ class KitchenIQDashboard {
             
             this.setLiveStatus('Ready to talk');
         } catch (err) {
-            console.error('Live assist error', err);
+            console.error('Live assist error:', err);
             this.setLiveStatus('Error sending to Coach');
             this.appendLiveMessage('Coach', 'Error - please try again');
         }
