@@ -24,6 +24,8 @@ class KIQ_Features {
             'shopping_optimization'=> array( 'basic', 'pro' ),
             'multi_user'           => array( 'pro' ),
             'custom_preferences'   => array( 'pro' ),
+            // Live assist (vision + transcript) is gated to top tier only
+            'live_assist'          => array( 'pro' ),
         );
 
         if ( ! isset( $feature_tiers[ $feature ] ) ) {

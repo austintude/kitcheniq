@@ -193,6 +193,80 @@ class KIQ_AI {
     }
 
     /**
+     * Live assist multimodal helper: takes transcript text and optional JPEG base64 frame.
+     */
+    public static function live_assist( $user_id, $transcript, $frame_base64 = '' ) {
+        if ( ! KIQ_API_KEY || empty( KIQ_API_KEY ) ) {
+            error_log( 'KitchenIQ: OpenAI API key not configured. Set KIQ_API_KEY environment variable or configure in WordPress admin (KitchenIQ → API Key).' );
+            return new WP_Error( 'missing_api_key', 'OpenAI API key not configured. Please contact your site administrator.' );
+        }
+
+        if ( empty( $transcript ) && empty( $frame_base64 ) ) {
+            return new WP_Error( 'missing_input', 'Please provide a transcript or frame to analyze.' );
+        }
+
+        $system_prompt = 'You are KitchenIQ Live Assist, a concise kitchen coach. Offer short, direct guidance. If an image is provided, base advice on what you see plus the user transcript. Prefer bullet-ish short sentences; avoid long essays.';
+
+        $user_content = array();
+        if ( ! empty( $transcript ) ) {
+            $user_content[] = array(
+                'type' => 'text',
+                'text' => 'User request: ' . $transcript,
+            );
+        } else {
+            $user_content[] = array(
+                'type' => 'text',
+                'text' => 'No transcript provided. Analyze the attached frame and suggest 1-2 next actions.',
+            );
+        }
+
+        if ( ! empty( $frame_base64 ) ) {
+            $user_content[] = array(
+                'type'      => 'image_url',
+                'image_url' => array(
+                    'url'    => 'data:image/jpeg;base64,' . $frame_base64,
+                    'detail' => 'high',
+                ),
+            );
+        }
+
+        $payload = array(
+            'model'       => get_option( 'kiq_ai_text_model', 'gpt-4o-mini' ),
+            'temperature' => 0.4,
+            'max_tokens'  => 400,
+            'messages'    => array(
+                array(
+                    'role'    => 'system',
+                    'content' => $system_prompt,
+                ),
+                array(
+                    'role'    => 'user',
+                    'content' => $user_content,
+                ),
+            ),
+        );
+
+        $response = self::call_openai( $payload );
+
+        if ( is_wp_error( $response ) ) {
+            return $response;
+        }
+
+        $message = $response['content'] ?? '';
+
+        if ( get_option( 'kiq_enable_ai_logging' ) ) {
+            $tokens = $response['usage']['total_tokens'] ?? 0;
+            $cost   = ( $tokens / 1000 ) * 0.0006; // rough estimate for gpt-4o-mini live assist
+            KIQ_Airtable::log_ai_request( $user_id, 'live_assist', $tokens, $cost );
+        }
+
+        return array(
+            'message' => $message,
+            'usage'   => $response['usage'] ?? array(),
+        );
+    }
+
+    /**
      * Call OpenAI API with retry logic and enhanced diagnostics
      */
     private static function call_openai( $payload, $retry_count = 0 ) {

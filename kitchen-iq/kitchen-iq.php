@@ -3,7 +3,7 @@
  * Plugin Name: KitchenIQ
  * Plugin URI: https://kitcheniq.ai
  * Description: AI-powered kitchen intelligence system. Scan your pantry, get personalized meal plans, and reduce food waste.
- * Version: 0.6.3
+ * Version: 0.6.11
  * Author: KitchenIQ
  * Author URI: https://kitcheniq.ai
  * License: GPL-2.0+
@@ -23,7 +23,7 @@ if ( ! defined( 'KIQ_PLUGIN_URL' ) ) {
     define( 'KIQ_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 }
 if ( ! defined( 'KIQ_VERSION' ) ) {
-    define( 'KIQ_VERSION', '0.6.3' );
+    define( 'KIQ_VERSION', '0.6.11' );
 }
 
 // API Key configuration - check environment first, then WordPress options
@@ -244,7 +244,8 @@ class KIQ_Main {
      */
     public static function maybe_serve_pwa_assets() {
         // Robust handling: honor query vars and direct path hits even if rewrites are stale.
-        $path = isset( $_SERVER['REQUEST_URI'] ) ? wp_parse_url( wp_unslash( $_SERVER['REQUEST_URI'] ), PHP_URL_PATH ) : '';
+        $request_uri = isset( $_SERVER['REQUEST_URI'] ) ? wp_unslash( $_SERVER['REQUEST_URI'] ) : '';
+        $path = wp_parse_url( $request_uri, PHP_URL_PATH );
         $path = is_string( $path ) ? $path : '';
 
         $wants_manifest = (bool) get_query_var( 'kiq_manifest' );
@@ -256,6 +257,11 @@ class KIQ_Main {
         }
         if ( $path === '/app/kitcheniq-sw.js' || $path === '/kitcheniq-sw.js' ) {
             $wants_sw = true;
+        }
+
+        // Log all PWA requests if WP_DEBUG is on
+        if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+            error_log( 'KIQ PWA check: path=' . $path . ', uri=' . $request_uri . ', manifest=' . ( $wants_manifest ? 'yes' : 'no' ) . ', sw=' . ( $wants_sw ? 'yes' : 'no' ) );
         }
 
         if ( $wants_manifest ) {
@@ -320,6 +326,11 @@ class KIQ_Main {
         }
         if ( ! empty( $icons ) ) {
             $manifest['icons'] = $icons;
+        }
+
+        // Log manifest serving if WP_DEBUG is on
+        if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+            error_log( 'KIQ: Serving manifest with scope=' . $scope . ', start_url=' . $start );
         }
 
         // Ensure clean output - no buffering, no warnings
