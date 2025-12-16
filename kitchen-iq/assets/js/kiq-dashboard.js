@@ -1241,16 +1241,17 @@ class KitchenIQDashboard {
 
         try {
             const recognizer = new Recognition();
-            recognizer.continuous = false;
+            recognizer.continuous = true;  // Changed to true: don't auto-stop on pauses
             recognizer.interimResults = true;
             recognizer.lang = 'en-US';
+            recognizer.maxAlternatives = 1;
 
             let finalTranscript = '';
             this.liveRecognizing = true;
             this.liveRecognizer = recognizer;
-            this.setLiveStatus('Listening... (click again to stop)');
+            this.setLiveStatus('Listening... (click "Stop listening" when done)');
             
-            console.log('Speech recognition started');
+            console.log('Speech recognition started in continuous mode');
             
             // Update button state
             const talkBtn = document.getElementById('kiq-live-ptt');
@@ -1314,7 +1315,11 @@ class KitchenIQDashboard {
 
             recognizer.onend = async () => {
                 console.log('Speech recognition onend event, finalTranscript:', finalTranscript);
+                
+                // Check if this was an unexpected stop (user didn't click stop button)
+                const wasStillRecognizing = this.liveRecognizing;
                 const text = (finalTranscript || '').trim();
+                
                 this.liveRecognizing = false;
                 if (this.liveAutoFrameInterval) {
                     clearInterval(this.liveAutoFrameInterval);
@@ -1325,14 +1330,23 @@ class KitchenIQDashboard {
                     talkBtn.classList.remove('listening');
                     talkBtn.textContent = 'Talk to KitchenIQ Coach';
                 }
-                if (!text) {
-                    this.setLiveStatus('No speech detected - try again');
-                    return;
+                
+                // If we have text, send it
+                if (text) {
+                    this.setLiveStatus('Sending to Coach...');
+                    const frame = await this.captureLiveFrame();
+                    await this.sendLiveAssist(text, frame);
+                } else {
+                    // No text captured
+                    if (wasStillRecognizing) {
+                        // Unexpected stop - likely browser timeout or interruption
+                        this.setLiveStatus('Recognition stopped - click Talk to restart');
+                        console.warn('Speech recognition stopped unexpectedly with no text');
+                    } else {
+                        // User manually stopped
+                        this.setLiveStatus('No speech detected - try again');
+                    }
                 }
-                this.setLiveStatus('Sending to Coach...');
-                // Capture final frame and send together
-                const frame = await this.captureLiveFrame();
-                await this.sendLiveAssist(text, frame);
             };
 
             recognizer.start();
@@ -1386,6 +1400,26 @@ class KitchenIQDashboard {
             const msg = data.message || 'Received';
             console.log('Coach message:', msg);
             this.appendLiveMessage('Coach', msg);
+            
+            // Handle inventory updates from Coach
+            if (data.inventory_updated && data.applied_changes) {
+                console.log('Coach applied inventory changes:', data.applied_changes);
+                
+                // Show brief notification of changes
+                const changesSummary = data.applied_changes.map(c => 
+                    `${c.action === 'add' ? '➕' : c.action === 'remove' ? '➖' : '✏️'} ${c.name}`
+                ).join(', ');
+                
+                this.appendLiveMessage('System', `Inventory updated: ${changesSummary}`);
+                
+                // Update local inventory state
+                this.inventory = data.inventory || [];
+                
+                // Refresh inventory display if on that tab
+                if (this.currentView === 'inventory') {
+                    this.renderInventory();
+                }
+            }
             
             // Optionally play TTS if enabled
             if (this.liveTtsEnabled && 'speechSynthesis' in window) {
