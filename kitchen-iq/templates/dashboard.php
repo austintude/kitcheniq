@@ -80,6 +80,10 @@
                 <span class="kiq-tab-icon" aria-hidden="true"><svg class="kiq-icon"><use href="#kiq-icon-meal"></use></svg></span>
                 <span class="kiq-tab-label">Meals</span>
             </button>
+            <button data-tab="live">
+                <span class="kiq-tab-icon" aria-hidden="true"><svg class="kiq-icon"><use href="#kiq-icon-video"></use></svg></span>
+                <span class="kiq-tab-label">KIQ Coach</span>
+            </button>
             <button data-tab="history">
                 <span class="kiq-tab-icon" aria-hidden="true"><svg class="kiq-icon"><use href="#kiq-icon-history"></use></svg></span>
                 <span class="kiq-tab-label">History</span>
@@ -109,6 +113,10 @@
                 <button data-tab="dashboard" class="kiq-side-btn">
                     <span class="kiq-side-icon" aria-hidden="true"><svg class="kiq-icon"><use href="#kiq-icon-meal"></use></svg></span>
                     <span>Meals</span>
+                </button>
+                <button data-tab="live" class="kiq-side-btn">
+                    <span class="kiq-side-icon" aria-hidden="true"><svg class="kiq-icon"><use href="#kiq-icon-video"></use></svg></span>
+                    <span>KIQ Coach</span>
                 </button>
                 <button data-tab="history" class="kiq-side-btn">
                     <span class="kiq-side-icon" aria-hidden="true"><svg class="kiq-icon"><use href="#kiq-icon-history"></use></svg></span>
@@ -286,7 +294,7 @@
                 </div>
 
                 <!-- INVENTORY TAB -->
-                <div data-content="inventory" class="kiq-content">
+                <div data-content="inventory" class="kiq-content" style="display: none;">
                     <div class="kiq-section-header">
                         <div>
                             <p class="kiq-eyebrow">Pantry</p>
@@ -305,6 +313,10 @@
                             <span class="kiq-btn-icon" aria-hidden="true"><svg class="kiq-icon"><use href="#kiq-icon-video"></use></svg></span>
                             Record video
                         </button>
+                        <button data-tab="live" id="kiq-coach-link" class="btn btn-outline">
+                            <span class="kiq-btn-icon" aria-hidden="true"><svg class="kiq-icon"><use href="#kiq-icon-mic"></use></svg></span>
+                            Guided pantry scan (Coach)
+                        </button>
                         <button id="kiq-skip-scan-btn" class="btn btn-ghost">
                             <span class="kiq-btn-icon" aria-hidden="true"><svg class="kiq-icon"><use href="#kiq-icon-arrow-right"></use></svg></span>
                             Skip & go to meals
@@ -312,6 +324,7 @@
                         <input type="file" id="kiq-camera-input" accept="image/*" multiple style="display: none;" />
                         <input type="file" id="kiq-video-input" accept="video/*" capture="environment" style="display: none;" />
                     </div>
+                    <p class="kiq-muted" style="margin-top:8px;">Let the Coach ask follow-ups while you scan so items are added/removed correctly.</p>
 
                     <!-- Video preview section -->
                     <div id="kiq-video-preview" class="kiq-video-preview" style="display: none;">
@@ -340,7 +353,6 @@
                                 Scan video + audio
                             </button>
                         </div>
-                    </div>
                     </div>
 
                     <!-- Multi-photo preview gallery -->
@@ -423,7 +435,7 @@
                 </div>
 
                 <!-- DASHBOARD/MEALS TAB -->
-                <div data-content="dashboard" class="kiq-content">
+                <div data-content="dashboard" class="kiq-content" style="display: none;">
                     <div class="kiq-section-header">
                         <div>
                             <p class="kiq-eyebrow">Meals</p>
@@ -485,8 +497,61 @@
                     <div id="kiq-selected-ingredients" class="kiq-selected-ingredients"></div>
                 </div>
 
+                <!-- KIQ COACH TAB (Pro) -->
+                <div data-content="live" class="kiq-content" style="display: none;">
+                    <div class="kiq-section-header">
+                        <div>
+                            <p class="kiq-eyebrow">KitchenIQ Coach</p>
+                            <h1>Talk to your KitchenIQ Coach</h1>
+                            <p class="kiq-muted">Open your camera and start speaking. The Coach will listen, watch, and respond in real-time.</p>
+                        </div>
+                        <div class="kiq-chip-row">
+                            <span class="kiq-chip">Beta</span>
+                            <span class="kiq-chip kiq-chip-soft">Pro only</span>
+                        </div>
+                    </div>
+
+                    <div class="kiq-card-surface kiq-live-block">
+                        <div class="kiq-card-header">
+                            <div>
+                                <p class="kiq-eyebrow">Live Camera Feed</p>
+                                <h3>See what the Coach sees</h3>
+                                <p class="kiq-muted">Starts with rear camera by default. Tap the camera button to toggle between front and rear.</p>
+                            </div>
+                            <div class="kiq-live-actions">
+                                <button id="kiq-live-start" class="btn btn-primary">Start Coach</button>
+                            </div>
+                        </div>
+                        <div class="kiq-live-preview">
+                            <video id="kiq-live-video" playsinline muted style="width:100%;max-height:260px;background:#f8f9fb;border:1px solid var(--kiq-border);border-radius:12px;"></video>
+                        </div>
+                        <div class="kiq-live-controls">
+                            <button id="kiq-live-ptt" class="btn btn-primary">Talk to KitchenIQ Coach</button>
+                            <button id="kiq-live-capture" class="btn btn-ghost" title="Toggle camera facing">📷 Switch camera</button>
+                            <button id="kiq-live-stop" class="btn btn-ghost">Stop</button>
+                            <span id="kiq-live-status" class="kiq-muted">Tap Start to begin</span>
+                        </div>
+                        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--kiq-border);">
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="checkbox" id="kiq-live-tts-toggle" style="width: 16px; height: 16px;">
+                                <span class="kiq-muted" style="font-size: 0.9em;">Play Coach replies aloud (text-to-speech)</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="kiq-card-surface">
+                        <div class="kiq-card-header">
+                            <div>
+                                <p class="kiq-eyebrow">Conversation</p>
+                                <h3>Assistant thread</h3>
+                            </div>
+                        </div>
+                        <div id="kiq-live-thread" class="kiq-live-thread kiq-muted" style="min-height:120px;">Conversation will appear here.</div>
+                    </div>
+                </div>
+
                 <!-- HISTORY TAB -->
-                <div data-content="history" class="kiq-content">
+                <div data-content="history" class="kiq-content" style="display: none;">
                     <div class="kiq-section-header">
                         <div>
                             <p class="kiq-eyebrow">History</p>
@@ -502,7 +567,7 @@
                 </div>
 
                 <!-- SETTINGS TAB -->
-                <div data-content="settings" class="kiq-content">
+                <div data-content="settings" class="kiq-content" style="display: none;">
                     <div class="kiq-section-header">
                         <div>
                             <p class="kiq-eyebrow">Settings</p>

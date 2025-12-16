@@ -23,6 +23,14 @@ class KIQ_Activator {
         // Set default options
         self::set_default_options();
 
+        // Register PWA rewrites before flushing
+        if ( class_exists( 'KIQ_Main' ) && method_exists( 'KIQ_Main', 'register_pwa_routes' ) ) {
+            KIQ_Main::register_pwa_routes();
+        } else {
+            add_rewrite_rule( '^kitcheniq\\.webmanifest$', 'index.php?kiq_manifest=1', 'top' );
+            add_rewrite_rule( '^kitcheniq-sw\\.js$', 'index.php?kiq_sw=1', 'top' );
+        }
+
         flush_rewrite_rules();
     }
 

@@ -40,6 +40,36 @@ class KIQ_Data {
     }
 
     /**
+     * Live assist conversation thread (lightweight) stored in usermeta.
+     */
+    public static function get_live_thread( $user_id ) {
+        $raw = get_user_meta( $user_id, 'kiq_live_thread', true );
+        if ( ! $raw ) {
+            return array();
+        }
+        $decoded = json_decode( $raw, true );
+        return is_array( $decoded ) ? $decoded : array();
+    }
+
+    public static function append_live_message( $user_id, $message ) {
+        if ( ! is_array( $message ) ) {
+            return;
+        }
+
+        $thread   = self::get_live_thread( $user_id );
+        $message['ts'] = current_time( 'mysql' );
+
+        $thread[] = $message;
+
+        // Keep last 30 entries to cap storage
+        if ( count( $thread ) > 30 ) {
+            $thread = array_slice( $thread, -30 );
+        }
+
+        update_user_meta( $user_id, 'kiq_live_thread', wp_json_encode( $thread ) );
+    }
+
+    /**
      * Save meal plan to history
      */
     public static function save_meal_history( $user_id, $plan_type, $meals, $shopping_list ) {

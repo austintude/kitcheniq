@@ -180,6 +180,21 @@ class KIQ_REST {
                 'permission_callback' => '__return_true',  // Allow public access to diagnostics
             )
         );
+
+        // Live assist (top-tier gated): accept transcript + optional frame image (data URL base64)
+        register_rest_route(
+            'kitcheniq/v1',
+            '/live-assist',
+            array(
+                'methods'             => 'POST',
+                'callback'            => array( __CLASS__, 'handle_live_assist' ),
+                'permission_callback' => array( __CLASS__, 'check_auth' ),
+                'args'                => array(
+                    'transcript' => array( 'type' => 'string' ),
+                    'frame_jpeg' => array( 'type' => 'string' ), // data URL or base64 string
+                ),
+            )
+        );
     }
 
     /**
@@ -226,19 +241,21 @@ class KIQ_REST {
         // Sanitize basic profile fields
         $profile = array(
             'household_size'        => intval( $params['household_size'] ?? 2 ),
-            'dietary_restrictions' => isset( $params['dietary_restrictions'] ) ? array_map( 'sanitize_text_field', $params['dietary_restrictions'] ) : array(),
-            'cooking_skill'        => sanitize_text_field( $params['cooking_skill'] ?? 'intermediate' ),
-            'budget_level'         => sanitize_text_field( $params['budget_level'] ?? 'moderate' ),
-            'time_per_meal'        => sanitize_text_field( $params['time_per_meal'] ?? 'moderate' ),
-            'dislikes'             => isset( $params['dislikes'] ) ? array_map( 'sanitize_text_field', $params['dislikes'] ) : array(),
-            'appliances'           => isset( $params['appliances'] ) ? array_map( 'sanitize_text_field', $params['appliances'] ) : array(),
+            'dietary_restrictions'  => isset( $params['dietary_restrictions'] ) ? array_map( 'sanitize_text_field', $params['dietary_restrictions'] ) : array(),
+            'cooking_skill'         => sanitize_text_field( $params['cooking_skill'] ?? 'intermediate' ),
+            'budget_level'          => sanitize_text_field( $params['budget_level'] ?? 'moderate' ),
+            'time_per_meal'         => sanitize_text_field( $params['time_per_meal'] ?? 'moderate' ),
+            'dislikes'              => isset( $params['dislikes'] ) ? array_map( 'sanitize_text_field', $params['dislikes'] ) : array(),
+            'appliances'            => isset( $params['appliances'] ) ? array_map( 'sanitize_text_field', $params['appliances'] ) : array(),
         );
 
         // Members (optional) - accept array of member objects with fields: name, appetite, allergies, intolerances, dislikes, age
         $members = array();
         if ( isset( $params['members'] ) && is_array( $params['members'] ) ) {
             foreach ( $params['members'] as $m ) {
-                if ( ! is_array( $m ) ) continue;
+                if ( ! is_array( $m ) ) {
+                    continue;
+                }
                 $member = array(
                     'name'          => sanitize_text_field( $m['name'] ?? '' ),
                     'appetite'      => intval( $m['appetite'] ?? 3 ),
@@ -260,6 +277,64 @@ class KIQ_REST {
         return new WP_REST_Response( array(
             'success' => true,
             'profile' => $profile,
+        ), 200 );
+    }
+
+    /**
+     * Handle live assist (tier-gated: pro only).
+     * Accepts transcript text and optional frame image (base64 or data URL), delegates to KIQ_AI.
+     */
+    public static function handle_live_assist( $request ) {
+        $user_id = get_current_user_id();
+
+        if ( ! KIQ_Features::allows( $user_id, 'live_assist' ) ) {
+            return new WP_REST_Response( array( 'error' => 'not_allowed', 'message' => 'Live assist is available on Pro.' ), 403 );
+        }
+
+        $params       = $request->get_json_params();
+        $transcript   = sanitize_textarea_field( $params['transcript'] ?? '' );
+        $frame_raw    = isset( $params['frame_jpeg'] ) ? $params['frame_jpeg'] : '';
+        $frame_base64 = '';
+
+        if ( is_string( $frame_raw ) && $frame_raw !== '' ) {
+            if ( strpos( $frame_raw, 'data:image' ) === 0 ) {
+                $parts        = explode( ',', $frame_raw, 2 );
+                $frame_base64 = $parts[1] ?? '';
+            } else {
+                $frame_base64 = $frame_raw;
+            }
+        }
+
+        $ai_response = KIQ_AI::live_assist( $user_id, $transcript, $frame_base64 );
+
+        if ( is_wp_error( $ai_response ) ) {
+            return new WP_REST_Response( array(
+                'error'   => $ai_response->get_error_code(),
+                'message' => $ai_response->get_error_message(),
+            ), 500 );
+        }
+
+        // Persist a short thread history for continuity
+        if ( ! empty( $transcript ) ) {
+            KIQ_Data::append_live_message( $user_id, array(
+                'role'        => 'user',
+                'text'        => $transcript,
+                'frame_bytes' => $frame_base64 ? strlen( base64_decode( $frame_base64, true ) ) : 0,
+            ) );
+        }
+
+        if ( ! empty( $ai_response['message'] ) ) {
+            KIQ_Data::append_live_message( $user_id, array(
+                'role' => 'assistant',
+                'text' => $ai_response['message'],
+            ) );
+        }
+
+        return new WP_REST_Response( array(
+            'message'      => $ai_response['message'] ?? '',
+            'transcript'   => $transcript,
+            'frame_bytes'  => $frame_base64 ? strlen( base64_decode( $frame_base64, true ) ) : 0,
+            'usage'        => $ai_response['usage'] ?? array(),
         ), 200 );
     }
 

@@ -12,6 +12,18 @@ class KitchenIQDashboard {
         this.inventory = null;
         this.mealPlan = null;
         this.selectedMealIndex = null;
+        // Live assist state
+        this.liveStream = null;
+        this.liveVideoEl = null;
+        this.liveStatusEl = null;
+        this.liveThreadEl = null;
+        this.liveRecognizer = null;
+        this.liveRecognizing = false;
+        this.liveSessionActive = false;
+        this.liveAutoFrameInterval = null;
+        this.liveUsingRearCamera = true;
+        this.liveTtsEnabled = false;
+        this.liveLatestFrame = null;
         this.stapleItems = [
             'salt',
             'pepper',
@@ -24,8 +36,45 @@ class KitchenIQDashboard {
             'nonstick spray',
             'water',
         ];
+
+        // PWA: register service worker (best-effort)
+        this.registerServiceWorker();
         
         this.init();
+    }
+
+    async registerServiceWorker() {
+        try {
+            if (!('serviceWorker' in navigator)) return;
+            // Service workers require secure context (HTTPS) except localhost.
+            if (!window.isSecureContext && location.hostname !== 'localhost') return;
+
+            // First, unregister any old service workers from the plugin path to avoid conflicts.
+            await this.unregisterOldServiceWorkers();
+
+            const swUrl = (kitcheniqData && kitcheniqData.pwaSw) ? kitcheniqData.pwaSw : '/app/kitcheniq-sw.js';
+            const scope = '/app/';
+
+            navigator.serviceWorker.register(swUrl, { scope });
+        } catch (e) {
+            // no-op
+        }
+    }
+
+    async unregisterOldServiceWorkers() {
+        try {
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            for (const reg of registrations) {
+                const scriptUrl = reg.active?.scriptURL || reg.waiting?.scriptURL || reg.installing?.scriptURL || '';
+                // Unregister anything not from /app/kitcheniq-sw.js
+                if (scriptUrl && !scriptUrl.includes('/app/kitcheniq-sw.js')) {
+                    await reg.unregister();
+                    console.log('Unregistered old service worker:', scriptUrl);
+                }
+            }
+        } catch (e) {
+            console.warn('Failed to unregister old service workers', e);
+        }
     }
 
     async init() {
@@ -64,8 +113,7 @@ class KitchenIQDashboard {
             // ignore if DOM not ready
         }
 
-        // Attempt to register PWA artifacts (manifest + service worker)
-        this.registerPWA();
+        // PWA registration now happens in constructor via registerServiceWorker()
     }
 
     async loadProfile() {
@@ -188,14 +236,17 @@ class KitchenIQDashboard {
         }
 
         // Top tabs delegate to sidebar if a matching side button exists, otherwise show directly
-        document.querySelectorAll('[data-tab]').forEach(btn => {
+        document.querySelectorAll('[data-tab]:not(.kiq-side-btn)').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
                 const tab = btn.dataset.tab;
+                console.log('Top nav button clicked, tab:', tab);
                 const side = document.querySelector(`.kiq-side-btn[data-tab="${tab}"]`);
                 if (side) {
+                    console.log('Found sidebar button, clicking it');
                     side.click();
                 } else {
+                    console.log('No sidebar button found, calling showTab directly');
                     this.showTab(tab);
                 }
             });
@@ -382,6 +433,30 @@ class KitchenIQDashboard {
         const scanVideoBtn = document.getElementById('kiq-scan-video');
         if (scanVideoBtn) {
             scanVideoBtn.addEventListener('click', () => this.scanVideo());
+        }
+
+        // Live assist controls
+        const liveStartBtn = document.getElementById('kiq-live-start');
+        if (liveStartBtn) {
+            liveStartBtn.addEventListener('click', () => this.toggleLiveSession());
+        }
+        const liveStopBtn = document.getElementById('kiq-live-stop');
+        if (liveStopBtn) {
+            liveStopBtn.addEventListener('click', () => this.stopLiveSession());
+        }
+        const liveCaptureBtn = document.getElementById('kiq-live-capture');
+        if (liveCaptureBtn) {
+            liveCaptureBtn.addEventListener('click', () => this.toggleCameraFacing());
+        }
+        const livePttBtn = document.getElementById('kiq-live-ptt');
+        if (livePttBtn) {
+            livePttBtn.addEventListener('click', () => this.toggleLiveAudio());
+        }
+        const liveTtsToggle = document.getElementById('kiq-live-tts-toggle');
+        if (liveTtsToggle) {
+            liveTtsToggle.addEventListener('change', (e) => {
+                this.liveTtsEnabled = e.target.checked;
+            });
         }
 
         // Menu toggle
@@ -696,6 +771,42 @@ class KitchenIQDashboard {
         this._savedTimeout = setTimeout(() => el.style.display = 'none', 1800);
     }
 
+    populateFormFromProfile() {
+        if (!this.profile || Object.keys(this.profile).length === 0) return;
+        
+        try {
+            const form = document.getElementById('kiq-onboarding-form');
+            if (!form) return;
+            
+            if (this.profile.household_size) {
+                const hsInput = document.getElementById('household_size');
+                if (hsInput) hsInput.value = this.profile.household_size;
+            }
+            if (this.profile.cooking_skill) {
+                const csInput = document.getElementById('cooking_skill');
+                if (csInput) csInput.value = this.profile.cooking_skill;
+            }
+            if (this.profile.budget_level) {
+                const blInput = document.getElementById('budget_level');
+                if (blInput) blInput.value = this.profile.budget_level;
+            }
+            if (this.profile.dietary_preferences) {
+                const dpInput = document.getElementById('dietary_preferences');
+                if (dpInput) dpInput.value = this.profile.dietary_preferences;
+            }
+            if (this.profile.allergies) {
+                const aInput = document.getElementById('allergies');
+                if (aInput) aInput.value = this.profile.allergies;
+            }
+            if (this.profile.dislikes) {
+                const dInput = document.getElementById('dislikes');
+                if (dInput) dInput.value = this.profile.dislikes;
+            }
+        } catch (err) {
+            console.warn('populateFormFromProfile error:', err);
+        }
+    }
+
     updateProfileSummary() {
         try {
             const profile = this.profile || {};
@@ -826,29 +937,7 @@ class KitchenIQDashboard {
         }
     }
 
-    /* PWA registration (manifest injection + service worker) */
-    registerPWA() {
-        try {
-            const pluginUrl = (window.kitcheniqData && window.kitcheniqData.pluginUrl) ? window.kitcheniqData.pluginUrl : (typeof kitcheniqData !== 'undefined' ? kitcheniqData.pluginUrl : '');
-            if (!pluginUrl) return;
-
-            // Inject manifest link if not present
-            if (!document.querySelector('link[rel="manifest"]')) {
-                const l = document.createElement('link');
-                l.rel = 'manifest';
-                l.href = pluginUrl + 'manifest.json';
-                document.head.appendChild(l);
-            }
-
-            if ('serviceWorker' in navigator) {
-                navigator.serviceWorker.register(pluginUrl + 'service-worker.js')
-                    .then(reg => console.log('KitchenIQ service worker registered', reg))
-                    .catch(err => console.warn('KitchenIQ SW registration failed', err));
-            }
-        } catch (err) {
-            console.warn('PWA registration error', err);
-        }
-    }
+    /* Deprecated: PWA registration now handled in constructor */
 
     /* Skeleton helpers */
     showSkeleton(containerId, count = 3, type = 'card') {
@@ -869,6 +958,8 @@ class KitchenIQDashboard {
     }
 
     showTab(tabName) {
+        console.log('showTab called with:', tabName);
+        
         // Hide all tabs
         document.querySelectorAll('[data-content]').forEach(el => {
             el.style.display = 'none';
@@ -881,6 +972,7 @@ class KitchenIQDashboard {
 
         // Show selected tab
         const tabContent = document.querySelector(`[data-content="${tabName}"]`);
+        console.log('Found tab content for', tabName, ':', tabContent);
         if (tabContent) {
             tabContent.style.display = 'block';
         }
@@ -919,6 +1011,401 @@ class KitchenIQDashboard {
         // Load data if needed
         if (tabName === 'dashboard' || tabName === 'inventory') {
             this.loadInventory();
+        }
+
+        // Initialize live tab helpers lazily
+        if (tabName === 'live') {
+            this.ensureLiveElements();
+        }
+    }
+
+    ensureLiveElements() {
+        if (!this.liveVideoEl) {
+            this.liveVideoEl = document.getElementById('kiq-live-video');
+        }
+        if (!this.liveStatusEl) {
+            this.liveStatusEl = document.getElementById('kiq-live-status');
+        }
+        if (!this.liveThreadEl) {
+            this.liveThreadEl = document.getElementById('kiq-live-thread');
+        }
+    }
+
+    setLiveStatus(text) {
+        if (this.liveStatusEl) {
+            this.liveStatusEl.textContent = text;
+        }
+    }
+
+    async toggleLiveSession() {
+        if (this.liveSessionActive) {
+            this.stopLiveSession();
+        } else {
+            await this.startLiveSession();
+        }
+    }
+
+    async startLiveSession() {
+        try {
+            this.ensureLiveElements();
+            if (!navigator.mediaDevices?.getUserMedia) {
+                this.setLiveStatus('Camera not supported on this device');
+                return;
+            }
+            this.setLiveStatus('Requesting camera...');
+            
+            let stream = null;
+            
+            // Note: We do NOT request audio from getUserMedia here.
+            // Web Speech API accesses the microphone independently and may conflict
+            // if both try to use the same audio device. We only need video for frame capture.
+            const constraints = {
+                video: { 
+                    facingMode: this.liveUsingRearCamera ? 'environment' : 'user',
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                }
+            };
+            
+            try {
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+                console.log('Camera stream obtained (audio handled separately by Web Speech API)');
+            } catch (err1) {
+                console.warn('Failed with facingMode, trying without constraint', err1);
+                // Fallback: Try video without facingMode
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({ 
+                        video: { width: { ideal: 1280 }, height: { ideal: 720 } }
+                    });
+                    console.log('Camera stream obtained (fallback, no facingMode)');
+                } catch (err2) {
+                    // Complete failure
+                    console.error('Camera request failed', err2);
+                    throw err2;
+                }
+            }
+            
+            if (!stream) {
+                this.setLiveStatus('Unable to access camera');
+                return;
+            }
+            
+            this.liveStream = stream;
+            
+            if (this.liveVideoEl) {
+                this.liveVideoEl.srcObject = stream;
+                await this.liveVideoEl.play();
+            }
+            
+            this.liveSessionActive = true;
+            this.liveRecognizing = false;
+            
+            this.setLiveStatus('Camera ready. Click "Talk" to start speaking.');
+            
+            // Update button text
+            const startBtn = document.getElementById('kiq-live-start');
+            if (startBtn) {
+                startBtn.textContent = 'Stop Coach';
+                startBtn.classList.add('btn-danger');
+            }
+            
+        } catch (err) {
+            console.error('Live session error:', err);
+            this.liveSessionActive = false;
+            
+            let errorMsg = 'Camera unavailable';
+            if (err.name === 'NotAllowedError') {
+                errorMsg = 'Permission denied. Check browser camera settings.';
+            } else if (err.name === 'NotFoundError') {
+                errorMsg = 'No camera device found';
+            } else if (err.name === 'NotReadableError') {
+                errorMsg = 'Camera is in use by another app';
+            }
+            
+            this.setLiveStatus(errorMsg);
+        }
+    }
+
+    stopLiveSession() {
+        if (this.liveStream) {
+            this.liveStream.getTracks().forEach(t => t.stop());
+            this.liveStream = null;
+        }
+        if (this.liveVideoEl) {
+            this.liveVideoEl.srcObject = null;
+        }
+        this.liveSessionActive = false;
+        this.liveRecognizing = false;
+        if (this.liveAutoFrameInterval) {
+            clearInterval(this.liveAutoFrameInterval);
+            this.liveAutoFrameInterval = null;
+        }
+        this.setLiveStatus('Stopped');
+        
+        // Update button text
+        const startBtn = document.getElementById('kiq-live-start');
+        if (startBtn) {
+            startBtn.textContent = 'Start Coach';
+            startBtn.classList.remove('btn-danger');
+        }
+        
+        const talkBtn = document.getElementById('kiq-live-ptt');
+        if (talkBtn) {
+            talkBtn.textContent = 'Talk to KitchenIQ Coach';
+            talkBtn.classList.remove('listening');
+        }
+    }
+
+    toggleCameraFacing() {
+        // Toggle between rear and front camera without restarting
+        if (!this.liveSessionActive) {
+            this.setLiveStatus('Start camera first');
+            return;
+        }
+        this.liveUsingRearCamera = !this.liveUsingRearCamera;
+        const facingMode = this.liveUsingRearCamera ? 'rear' : 'front';
+        this.setLiveStatus(`Switching to ${facingMode} camera...`);
+        
+        // Restart stream with new facing mode
+        this.stopLiveSession();
+        setTimeout(() => this.startLiveSession(), 300);
+    }
+
+    async captureLiveFrame() {
+        try {
+            this.ensureLiveElements();
+            if (!this.liveVideoEl || !this.liveVideoEl.videoWidth) {
+                this.setLiveStatus('Start camera first');
+                return;
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = this.liveVideoEl.videoWidth;
+            canvas.height = this.liveVideoEl.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(this.liveVideoEl, 0, 0, canvas.width, canvas.height);
+            this.liveLatestFrame = canvas.toDataURL('image/jpeg', 0.6);
+            return this.liveLatestFrame;
+        } catch (err) {
+            console.error('Capture frame failed', err);
+            return null;
+        }
+    }
+
+    appendLiveMessage(role, text) {
+        this.ensureLiveElements();
+        if (!this.liveThreadEl) return;
+        if (this.liveThreadEl.classList.contains('kiq-muted')) {
+            this.liveThreadEl.classList.remove('kiq-muted');
+            this.liveThreadEl.textContent = '';
+        }
+        const block = document.createElement('div');
+        block.className = 'kiq-live-msg';
+        block.innerHTML = `<strong>${role}:</strong> ${text}`;
+        this.liveThreadEl.appendChild(block);
+        this.liveThreadEl.scrollTop = this.liveThreadEl.scrollHeight;
+    }
+
+    async toggleLiveAudio() {
+        if (!this.liveSessionActive) {
+            this.setLiveStatus('Start camera first');
+            return;
+        }
+
+        const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+        // Toggle off if already listening
+        if (this.liveRecognizing && this.liveRecognizer) {
+            try {
+                this.liveRecognizer.stop();
+                if (this.liveAutoFrameInterval) {
+                    clearInterval(this.liveAutoFrameInterval);
+                    this.liveAutoFrameInterval = null;
+                }
+                this.setLiveStatus('Processing Coach response...');
+            } catch (e) {
+                console.error('Error stopping recognition:', e);
+            }
+            this.liveRecognizing = false;
+            return;
+        }
+
+        // Fallback to text prompt if speech recognition is unavailable
+        if (!Recognition) {
+            console.warn('SpeechRecognition API not available');
+            const transcript = window.prompt('Speech recognition not supported. Type your request for KIQ Coach:');
+            if (transcript) {
+                await this.sendLiveAssist(transcript);
+            }
+            return;
+        }
+
+        try {
+            const recognizer = new Recognition();
+            recognizer.continuous = false;
+            recognizer.interimResults = true;
+            recognizer.lang = 'en-US';
+
+            let finalTranscript = '';
+            this.liveRecognizing = true;
+            this.liveRecognizer = recognizer;
+            this.setLiveStatus('Listening... (click again to stop)');
+            
+            console.log('Speech recognition started');
+            
+            // Update button state
+            const talkBtn = document.getElementById('kiq-live-ptt');
+            if (talkBtn) {
+                talkBtn.classList.add('listening');
+                talkBtn.textContent = 'Stop listening';
+            }
+
+            // Start auto-frame capture every 8 seconds
+            this.liveAutoFrameInterval = setInterval(async () => {
+                await this.captureLiveFrame();
+            }, 8000);
+
+            recognizer.onstart = () => {
+                console.log('Speech recognition onstart event fired');
+            };
+
+            recognizer.onresult = (event) => {
+                console.log('onresult event:', event.results.length, 'results, isFinal:', event.results[event.results.length - 1]?.isFinal);
+                let interim = '';
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const result = event.results[i];
+                    if (result.isFinal) {
+                        finalTranscript += result[0].transcript + ' ';
+                    } else {
+                        interim += result[0].transcript;
+                    }
+                }
+                const heard = (finalTranscript + ' ' + interim).trim();
+                if (heard) {
+                    this.setLiveStatus(`Heard: ${heard}`);
+                }
+            };
+
+            recognizer.onerror = (event) => {
+                console.error('Speech recognition error:', event.error);
+                this.liveRecognizing = false;
+                if (this.liveAutoFrameInterval) {
+                    clearInterval(this.liveAutoFrameInterval);
+                    this.liveAutoFrameInterval = null;
+                }
+                
+                let errorMsg = 'Microphone error';
+                if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+                    errorMsg = 'Mic blocked - enable in browser settings';
+                } else if (event.error === 'network') {
+                    errorMsg = 'Network error - check connection';
+                } else if (event.error === 'no-speech') {
+                    errorMsg = 'No speech detected - try again';
+                } else if (event.error === 'audio-capture') {
+                    errorMsg = 'Mic not accessible - check permissions';
+                }
+                
+                this.setLiveStatus(errorMsg);
+                const talkBtn = document.getElementById('kiq-live-ptt');
+                if (talkBtn) {
+                    talkBtn.classList.remove('listening');
+                    talkBtn.textContent = 'Talk to KitchenIQ Coach';
+                }
+            };
+
+            recognizer.onend = async () => {
+                console.log('Speech recognition onend event, finalTranscript:', finalTranscript);
+                const text = (finalTranscript || '').trim();
+                this.liveRecognizing = false;
+                if (this.liveAutoFrameInterval) {
+                    clearInterval(this.liveAutoFrameInterval);
+                    this.liveAutoFrameInterval = null;
+                }
+                const talkBtn = document.getElementById('kiq-live-ptt');
+                if (talkBtn) {
+                    talkBtn.classList.remove('listening');
+                    talkBtn.textContent = 'Talk to KitchenIQ Coach';
+                }
+                if (!text) {
+                    this.setLiveStatus('No speech detected - try again');
+                    return;
+                }
+                this.setLiveStatus('Sending to Coach...');
+                // Capture final frame and send together
+                const frame = await this.captureLiveFrame();
+                await this.sendLiveAssist(text, frame);
+            };
+
+            recognizer.start();
+            console.log('Recognition.start() called');
+        } catch (err) {
+            console.error('Speech recognition exception:', err);
+            this.liveRecognizing = false;
+            const transcript = window.prompt('Error with speech recognition. Type your request for KIQ Coach:');
+            if (transcript) {
+                await this.sendLiveAssist(transcript);
+            }
+        }
+    }
+
+    async sendLiveAssist(transcript, frameDataUrl = null) {
+        // Use latest captured frame if not provided
+        const frame = frameDataUrl || this.liveLatestFrame || '';
+        
+        console.log('sendLiveAssist called - transcript length:', transcript?.length, 'frame length:', frame?.length);
+        
+        this.setLiveStatus('Sending to Coach...');
+        this.appendLiveMessage('You', transcript || '(frame sent)');
+        try {
+            const payload = { transcript: transcript || '', frame_jpeg: frame };
+            console.log('Sending payload to /live-assist:', { 
+                transcriptLength: payload.transcript.length, 
+                frameLength: payload.frame_jpeg.length 
+            });
+            
+            const res = await fetch(`${this.apiRoot}kitcheniq/v1/live-assist`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-WP-Nonce': this.nonce,
+                },
+                body: JSON.stringify(payload),
+            });
+            
+            console.log('Response status:', res.status, 'ok:', res.ok);
+            
+            const data = await res.json();
+            console.log('Response data:', data);
+            
+            if (!res.ok || data.error) {
+                const msg = data.message || data.error || 'Coach failed to respond';
+                console.error('Coach error response:', msg);
+                this.setLiveStatus(msg);
+                this.appendLiveMessage('Coach', msg);
+                return;
+            }
+            const msg = data.message || 'Received';
+            console.log('Coach message:', msg);
+            this.appendLiveMessage('Coach', msg);
+            
+            // Optionally play TTS if enabled
+            if (this.liveTtsEnabled && 'speechSynthesis' in window) {
+                try {
+                    const utterance = new SpeechSynthesisUtterance(msg);
+                    utterance.rate = 1.0;
+                    utterance.pitch = 1.0;
+                    speechSynthesis.cancel(); // Clear any pending utterances
+                    speechSynthesis.speak(utterance);
+                    console.log('TTS playback started');
+                } catch (err) {
+                    console.warn('TTS failed', err);
+                }
+            }
+            
+            this.setLiveStatus('Ready to talk');
+        } catch (err) {
+            console.error('Live assist error:', err);
+            this.setLiveStatus('Error sending to Coach');
+            this.appendLiveMessage('Coach', 'Error - please try again');
         }
     }
 

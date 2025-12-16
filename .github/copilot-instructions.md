@@ -1,0 +1,25 @@
+# KitchenIQ – Copilot Instructions
+
+- Project: WordPress plugin that delivers an AI-powered pantry scanner + meal planner; main entry is kitchen-iq/kitchen-iq.php.
+- Always bump the plugin version in kitchen-iq.php (header + KIQ_VERSION constant) whenever you change code or docs. Current baseline: 0.5.6.
+- Core classes live in kitchen-iq/includes/:
+  - KIQ_Main wires hooks, shortcode [kitchen_iq_dashboard], PWA routes (kitcheniq.webmanifest, kitcheniq-sw.js), and enqueues assets versioned by KIQ_VERSION.
+  - KIQ_REST exposes all API routes under kitcheniq/v1 (profile, inventory, meals, ratings, inventory-confirm, inventory-scan, inventory-scan-video, inventory-code, usage, transcribe-audio, diagnostic). Use WP auth; diagnostics is public.
+  - KIQ_AI wraps OpenAI chat completions for meals and vision; uses json_schema response_format, retries, logging to Airtable when enabled. Respect feature checks before calling.
+  - KIQ_Data is the data layer: usermeta for profile/inventory/plan, custom tables kiq_meal_history, kiq_meal_ratings, kiq_usage; handles perishability updates and inventory decrements after meals.
+  - KIQ_Features holds tier gates (free/basic/pro), rate limits, prompt block assembly from WP options.
+  - KIQ_Airtable, KIQ_Admin, KIQ_Activator cover analytics logging, admin settings, and DB setup (see class files for specifics).
+- Frontend: assets/js/kiq-dashboard.js and assets/css/kiq-dashboard.css serve the dashboard rendered via templates/dashboard.php; only enqueued on singular posts containing the shortcode.
+- PWA: manifest/service worker served from site root via KIQ_Main; service worker caches plugin assets keyed by KIQ_VERSION.
+- AI configuration pulls from WP options with fallbacks: kiq_ai_text_model/vision_model (default gpt-4o-mini), temperature/max_tokens, prompt block options (kiq_ai_meal_*). Env var KIQ_API_KEY wins over WP option kiq_api_key_setting. Airtable keys read from env AIRTABLE_API_KEY/BASE_ID or WP options.
+- Feature gates/limits: defaults (free: 1 meal/scan per week; basic: 5 meals/4 scans; pro: unlimited) but can be overridden via kiq_tier_limits option. Use KIQ_Features::allows/can_generate_meal/can_scan_pantry/get_remaining_usage before performing work.
+- Data flow: REST handlers fetch profile/inventory via KIQ_Data, call KIQ_AI, persist history, then optionally apply inventory consumption and send to Airtable. Handle WP_Error responses and log failures; never throw uncaught exceptions from route handlers.
+- Testing: phpunit -c phpunit.xml.dist. tests/bootstrap.php provides WordPress stubs and globals used by smoke tests; avoid direct WP calls that are not stubbed or extend the bootstrap when adding tests. Sample: tests/Smoke/ShortcodeSmokeTest.php verifies enqueue + shortcode auth guard.
+- Conventions:
+  - Sanitize all input from REST (sanitize_text_field, array_map) and return WP_REST_Response with proper HTTP codes.
+  - Prefer wp_json_encode, esc_* helpers, WP_Date/time helpers; log only under WP_DEBUG.
+  - When adding REST routes, register under kitcheniq/v1 and use check_auth or a tailored permission callback.
+  - Keep dashboard assets cache-busted with KIQ_VERSION; update service worker cache name if you change asset paths.
+- Build/deploy: plugin is pure PHP/JS/CSS—no build step checked in. Ensure new tables/options are created in activator if adding persistence.
+- Safety: never commit secrets; rely on env vars for API keys. Vision endpoints must enforce same-origin caching and authenticate users.
+- When unsure about product behavior, consult kitchen-iq/README.md for feature/tier expectations and env vars.
