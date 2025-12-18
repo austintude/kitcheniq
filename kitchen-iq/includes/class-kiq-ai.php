@@ -194,8 +194,9 @@ class KIQ_AI {
 
     /**
      * Live assist multimodal helper: takes transcript text and optional JPEG base64 frame.
+     * Now includes inventory management capabilities for pantry verification and updates.
      */
-    public static function live_assist( $user_id, $transcript, $frame_base64 = '' ) {
+    public static function live_assist( $user_id, $transcript, $frame_base64 = '', $current_inventory = array() ) {
         if ( ! KIQ_API_KEY || empty( KIQ_API_KEY ) ) {
             error_log( 'KitchenIQ: OpenAI API key not configured. Set KIQ_API_KEY environment variable or configure in WordPress admin (KitchenIQ → API Key).' );
             return new WP_Error( 'missing_api_key', 'OpenAI API key not configured. Please contact your site administrator.' );
@@ -205,7 +206,28 @@ class KIQ_AI {
             return new WP_Error( 'missing_input', 'Please provide a transcript or frame to analyze.' );
         }
 
-        $system_prompt = 'You are KitchenIQ Live Assist, a concise kitchen coach. Offer short, direct guidance. If an image is provided, base advice on what you see plus the user transcript. Prefer bullet-ish short sentences; avoid long essays.';
+        // Build system prompt with inventory context if available
+        $system_prompt = 'You are KitchenIQ Coach, a helpful AI kitchen assistant with pantry management superpowers. Offer concise, actionable guidance.';
+        
+        if ( ! empty( $current_inventory ) ) {
+            $system_prompt .= "\n\nCURRENT PANTRY INVENTORY:\n" . wp_json_encode( $current_inventory, JSON_PRETTY_PRINT );
+            $system_prompt .= "\n\nWhen the user shows you their pantry or mentions items:";
+            $system_prompt .= "\n- Compare what you see/hear with the current inventory above";
+            $system_prompt .= "\n- Ask clarifying questions about quantity changes, freshness states, or items that look different";
+            $system_prompt .= "\n- If items are missing from view but in inventory, ask if they should be removed";
+            $system_prompt .= "\n- If new items appear, ask for details (quantity, freshness, category)";
+            $system_prompt .= "\n- If something looks spoiled or past due, mention it and ask if it should be removed";
+            $system_prompt .= "\n\nReturn your response as JSON with TWO fields:";
+            $system_prompt .= "\n1. \"message\": Your conversational response to the user (string)";
+            $system_prompt .= "\n2. \"inventory_updates\": Array of inventory changes (can be empty if just chatting). Each update object can have:";
+            $system_prompt .= "\n   - \"action\": \"add\", \"update\", or \"remove\"";
+            $system_prompt .= "\n   - \"id\": item ID (for update/remove only)";
+            $system_prompt .= "\n   - \"name\": item name (for add/update)";
+            $system_prompt .= "\n   - \"quantity\": new quantity (for add/update)";
+            $system_prompt .= "\n   - \"freshness_label\": \"fresh\", \"good\", \"use_soon\", \"expired\" (for add/update)";
+            $system_prompt .= "\n   - \"category\": item category (for add)";
+            $system_prompt .= "\n   - \"reason\": brief reason for this change (for user confirmation)";
+        }
 
         $user_content = array();
         if ( ! empty( $transcript ) ) {
@@ -233,7 +255,7 @@ class KIQ_AI {
         $payload = array(
             'model'       => get_option( 'kiq_ai_text_model', 'gpt-4o-mini' ),
             'temperature' => 0.4,
-            'max_tokens'  => 400,
+            'max_tokens'  => 800, // Increased for inventory updates
             'messages'    => array(
                 array(
                     'role'    => 'system',
@@ -246,6 +268,11 @@ class KIQ_AI {
             ),
         );
 
+        // Add JSON mode when inventory is provided for structured responses
+        if ( ! empty( $current_inventory ) ) {
+            $payload['response_format'] = array( 'type' => 'json_object' );
+        }
+
         $response = self::call_openai( $payload );
 
         if ( is_wp_error( $response ) ) {
@@ -253,6 +280,25 @@ class KIQ_AI {
         }
 
         $message = $response['content'] ?? '';
+        $inventory_updates = array();
+
+        // Parse JSON response if inventory mode
+        if ( ! empty( $current_inventory ) ) {
+            $parsed = json_decode( $message, true );
+            if ( $parsed && isset( $parsed['message'] ) ) {
+                $message = $parsed['message'];
+                $inventory_updates = $parsed['inventory_updates'] ?? array();
+                
+                if ( defined( 'WP_DEBUG' ) && WP_DEBUG && ! empty( $inventory_updates ) ) {
+                    error_log( 'KIQ: Coach proposed ' . count( $inventory_updates ) . ' inventory updates' );
+                }
+            } else {
+                // Fallback if AI didn't return proper JSON
+                if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+                    error_log( 'KIQ: Coach returned non-JSON response in inventory mode: ' . substr( $message, 0, 200 ) );
+                }
+            }
+        }
 
         if ( get_option( 'kiq_enable_ai_logging' ) ) {
             $tokens = $response['usage']['total_tokens'] ?? 0;
@@ -261,8 +307,9 @@ class KIQ_AI {
         }
 
         return array(
-            'message' => $message,
-            'usage'   => $response['usage'] ?? array(),
+            'message'           => $message,
+            'inventory_updates' => $inventory_updates,
+            'usage'             => $response['usage'] ?? array(),
         );
     }
 

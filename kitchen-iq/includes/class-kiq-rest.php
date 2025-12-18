@@ -305,7 +305,10 @@ class KIQ_REST {
             }
         }
 
-        $ai_response = KIQ_AI::live_assist( $user_id, $transcript, $frame_base64 );
+        // Load current inventory for Coach to analyze
+        $current_inventory = KIQ_Data::get_inventory( $user_id );
+
+        $ai_response = KIQ_AI::live_assist( $user_id, $transcript, $frame_base64, $current_inventory );
 
         if ( is_wp_error( $ai_response ) ) {
             return new WP_REST_Response( array(
@@ -330,11 +333,86 @@ class KIQ_REST {
             ) );
         }
 
+        // Apply inventory updates if Coach proposed any
+        $inventory_updates = $ai_response['inventory_updates'] ?? array();
+        $updated_inventory = $current_inventory;
+        $applied_changes   = array();
+
+        if ( ! empty( $inventory_updates ) && is_array( $inventory_updates ) ) {
+            foreach ( $inventory_updates as $update ) {
+                $action = $update['action'] ?? '';
+                
+                if ( $action === 'add' ) {
+                    // Add new item
+                    $new_item = array(
+                        'id'                 => uniqid( 'item_' ),
+                        'name'               => sanitize_text_field( $update['name'] ?? '' ),
+                        'quantity'           => sanitize_text_field( $update['quantity'] ?? '1' ),
+                        'freshness_label'    => sanitize_text_field( $update['freshness_label'] ?? 'good' ),
+                        'category'           => sanitize_text_field( $update['category'] ?? 'Other' ),
+                        'added_via'          => 'coach',
+                        'added_at'           => current_time( 'mysql' ),
+                    );
+                    $updated_inventory[] = $new_item;
+                    $applied_changes[] = array(
+                        'action' => 'add',
+                        'name'   => $new_item['name'],
+                        'reason' => $update['reason'] ?? 'Added by Coach',
+                    );
+                } elseif ( $action === 'update' ) {
+                    // Update existing item
+                    $item_id = $update['id'] ?? '';
+                    foreach ( $updated_inventory as $idx => $item ) {
+                        if ( $item['id'] === $item_id ) {
+                            if ( isset( $update['quantity'] ) ) {
+                                $updated_inventory[ $idx ]['quantity'] = sanitize_text_field( $update['quantity'] );
+                            }
+                            if ( isset( $update['freshness_label'] ) ) {
+                                $updated_inventory[ $idx ]['freshness_label'] = sanitize_text_field( $update['freshness_label'] );
+                            }
+                            if ( isset( $update['name'] ) ) {
+                                $updated_inventory[ $idx ]['name'] = sanitize_text_field( $update['name'] );
+                            }
+                            $applied_changes[] = array(
+                                'action' => 'update',
+                                'name'   => $updated_inventory[ $idx ]['name'],
+                                'reason' => $update['reason'] ?? 'Updated by Coach',
+                            );
+                            break;
+                        }
+                    }
+                } elseif ( $action === 'remove' ) {
+                    // Remove item
+                    $item_id = $update['id'] ?? '';
+                    foreach ( $updated_inventory as $idx => $item ) {
+                        if ( $item['id'] === $item_id ) {
+                            $applied_changes[] = array(
+                                'action' => 'remove',
+                                'name'   => $item['name'],
+                                'reason' => $update['reason'] ?? 'Removed by Coach',
+                            );
+                            unset( $updated_inventory[ $idx ] );
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Save updated inventory if changes were applied
+            if ( ! empty( $applied_changes ) ) {
+                $updated_inventory = array_values( $updated_inventory ); // Re-index array
+                KIQ_Data::save_inventory( $user_id, $updated_inventory );
+            }
+        }
+
         return new WP_REST_Response( array(
-            'message'      => $ai_response['message'] ?? '',
-            'transcript'   => $transcript,
-            'frame_bytes'  => $frame_base64 ? strlen( base64_decode( $frame_base64, true ) ) : 0,
-            'usage'        => $ai_response['usage'] ?? array(),
+            'message'          => $ai_response['message'] ?? '',
+            'transcript'       => $transcript,
+            'frame_bytes'      => $frame_base64 ? strlen( base64_decode( $frame_base64, true ) ) : 0,
+            'usage'            => $ai_response['usage'] ?? array(),
+            'inventory_updated' => ! empty( $applied_changes ),
+            'applied_changes'  => $applied_changes,
+            'inventory'        => $updated_inventory,
         ), 200 );
     }
 
