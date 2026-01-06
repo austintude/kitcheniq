@@ -350,6 +350,15 @@ class KitchenIQDashboard {
                 if (removeBtn) {
                     const idx = parseInt(removeBtn.closest('[data-index]')?.dataset.index || '-1', 10);
                     if (idx >= 0) this.removeInventoryItem(idx);
+                    return;
+                }
+
+                // Phase 2: Confirm item button
+                const confirmBtn = e.target.closest('[data-action="confirm-item"]');
+                if (confirmBtn) {
+                    const idx = parseInt(confirmBtn.closest('[data-index]')?.dataset.index || '-1', 10);
+                    if (idx >= 0) this.confirmInventoryItem(idx);
+                    return;
                 }
             });
 
@@ -358,11 +367,16 @@ class KitchenIQDashboard {
                 if (!parent) return;
                 const idx = parseInt(parent.dataset.index || '-1', 10);
                 if (idx < 0 || !this.inventory || !this.inventory[idx]) return;
+
                 if (e.target.dataset.action === 'qty') {
                     const val = parseFloat(e.target.value);
                     this.updateInventoryItem(idx, { quantity: isNaN(val) ? 0 : val });
                 } else if (e.target.dataset.action === 'status') {
                     this.updateInventoryItem(idx, { status: e.target.value || 'fresh' });
+                } else if (e.target.dataset.action === 'location') {
+                    this.updateInventoryItem(idx, { location: e.target.value || 'pantry' });
+                } else if (e.target.dataset.action === 'category') {
+                    this.updateInventoryItem(idx, { category: e.target.value || 'other' });
                 }
             });
         }
@@ -2089,47 +2103,169 @@ class KitchenIQDashboard {
             return;
         }
 
-        // Map filtered items to their original indices for proper editing/removal
-        const itemsWithIndices = filteredItems.map(item => ({
-            item,
-            originalIndex: this.inventory.indexOf(item)
-        }));
+        // **Phase 2: Group by location**
+        const grouped = this.groupInventoryByLocation(filteredItems);
 
-        const itemsHtml = itemsWithIndices.map(({ item, originalIndex }) => {
-            const statusLabel = (item.status || 'fresh').toString().toLowerCase();
-            return `
-            <div class="kiq-inventory-item" data-index="${originalIndex}">
-                <div class="kiq-item-top">
-                    <div>
-                        <div class="kiq-item-name">${item.name || 'Unnamed item'}</div>
-                        <div class="kiq-item-details">
-                            <span class="kiq-category">${item.category || 'general'}</span>
-                            <span class="kiq-status ${statusLabel}">${statusLabel}</span>
+        let groupedHtml = '';
+        for (const [location, items] of Object.entries(grouped)) {
+            const locationLabel = this.getLocationLabel(location);
+            const itemsWithIndices = items.map(item => ({
+                item,
+                originalIndex: this.inventory.indexOf(item)
+            }));
+
+            const itemsHtml = itemsWithIndices.map(({ item, originalIndex }) => {
+                const statusLabel = (item.status || 'fresh').toString().toLowerCase();
+                const decayScore = item.decay_score ?? 0;
+                const confidence = item.confidence ?? 1.0;
+                const badges = this.getInventoryBadges(item, decayScore, confidence);
+
+                return `
+                <div class="kiq-inventory-item" data-index="${originalIndex}">
+                    <div class="kiq-item-top">
+                        <div>
+                            <div class="kiq-item-name">${item.name || 'Unnamed item'}</div>
+                            <div class="kiq-item-details">
+                                <span class="kiq-category">${item.category || 'other'}</span>
+                                <span class="kiq-status kiq-status-${statusLabel}">${statusLabel}</span>
+                                ${badges}
+                            </div>
+                            ${item.expiry_estimate ? `<div class="kiq-expiry">Expires: ${item.expiry_estimate}</div>` : ''}
+                            ${item.best_by ? `<div class="kiq-expiry">Best by: ${new Date(item.best_by).toLocaleDateString()}</div>` : ''}
                         </div>
-                        ${item.expiry_estimate ? `<div class="kiq-expiry">Expires: ${item.expiry_estimate}</div>` : ''}
+                        <div class="kiq-item-actions">
+                            ${item.quantity ? `<span class="kiq-pill-muted">Qty: ${item.quantity}</span>` : ''}
+                            <button type="button" class="kiq-confirm-btn" data-action="confirm-item" aria-label="Confirm ${item.name || 'item'}" title="Confirm freshness">✓</button>
+                            <button type="button" class="kiq-remove-btn" data-action="remove-item" aria-label="Remove ${item.name || 'item'}" title="Remove item">−</button>
+                        </div>
                     </div>
-                    <div class="kiq-item-actions">
-                        ${item.quantity ? `<span class="kiq-pill-muted">Qty: ${item.quantity}</span>` : ''}
-                        <button type="button" class="kiq-remove-btn" data-action="remove-item" aria-label="Remove ${item.name || 'item'}" title="Remove item">−</button>
+
+                    <div class="kiq-item-edit">
+                        <label>Quantity
+                            <input type="number" min="0" step="0.25" value="${item.quantity ?? 1}" data-action="qty" />
+                        </label>
+                        <label>Location
+                            <select data-action="location">
+                                <option value="pantry" ${item.location === 'pantry' ? 'selected' : ''}>Pantry</option>
+                                <option value="fridge" ${item.location === 'fridge' ? 'selected' : ''}>Fridge</option>
+                                <option value="freezer" ${item.location === 'freezer' ? 'selected' : ''}>Freezer</option>
+                            </select>
+                        </label>
+                        <label>Category
+                            <select data-action="category">
+                                <option value="meats" ${item.category === 'meats' ? 'selected' : ''}>Meats</option>
+                                <option value="veg" ${item.category === 'veg' ? 'selected' : ''}>Vegetables</option>
+                                <option value="condiments" ${item.category === 'condiments' ? 'selected' : ''}>Condiments</option>
+                                <option value="dry" ${item.category === 'dry' ? 'selected' : ''}>Dry Goods</option>
+                                <option value="spices" ${item.category === 'spices' ? 'selected' : ''}>Spices</option>
+                                <option value="drinks" ${item.category === 'drinks' ? 'selected' : ''}>Drinks</option>
+                                <option value="prepared" ${item.category === 'prepared' ? 'selected' : ''}>Prepared</option>
+                                <option value="other" ${item.category === 'other' ? 'selected' : ''}>Other</option>
+                            </select>
+                        </label>
+                        <label>Status
+                            <select data-action="status">
+                                <option value="fresh" ${statusLabel === 'fresh' ? 'selected' : ''}>Fresh</option>
+                                <option value="nearing" ${statusLabel === 'nearing' ? 'selected' : ''}>Expiring Soon</option>
+                                <option value="expired" ${statusLabel === 'expired' ? 'selected' : ''}>Expired</option>
+                                <option value="low" ${statusLabel === 'low' ? 'selected' : ''}>Low</option>
+                                <option value="out" ${statusLabel === 'out' ? 'selected' : ''}>Out</option>
+                            </select>
+                        </label>
                     </div>
                 </div>
+            `}).join('');
 
-                <div class="kiq-item-edit">
-                    <label>Quantity
-                        <input type="number" min="0" step="0.25" value="${item.quantity ?? 1}" data-action="qty" />
-                    </label>
-                    <label>Status
-                        <select data-action="status">
-                            <option value="fresh" ${statusLabel === 'fresh' ? 'selected' : ''}>Fresh</option>
-                            <option value="low" ${statusLabel === 'low' ? 'selected' : ''}>Low</option>
-                            <option value="out" ${statusLabel === 'out' ? 'selected' : ''}>Out</option>
-                        </select>
-                    </label>
+            groupedHtml += `
+                <div class="kiq-inventory-group">
+                    <h3 class="kiq-group-header">
+                        <span class="kiq-location-icon">${this.getLocationIcon(location)}</span>
+                        ${locationLabel}
+                        <span class="kiq-group-count">${items.length}</span>
+                    </h3>
+                    ${itemsHtml}
                 </div>
-            </div>
-        `}).join('');
+            `;
+        }
 
-        container.innerHTML = itemsHtml;
+        container.innerHTML = groupedHtml;
+    }
+
+    groupInventoryByLocation(items) {
+        const groups = {
+            fridge: [],
+            freezer: [],
+            pantry: []
+        };
+
+        items.forEach(item => {
+            const location = item.location || 'pantry';
+            if (!groups[location]) {
+                groups[location] = [];
+            }
+            groups[location].push(item);
+        });
+
+        // Remove empty groups
+        Object.keys(groups).forEach(key => {
+            if (groups[key].length === 0) {
+                delete groups[key];
+            }
+        });
+
+        return groups;
+    }
+
+    getLocationLabel(location) {
+        const labels = {
+            fridge: 'Fridge',
+            freezer: 'Freezer',
+            pantry: 'Pantry'
+        };
+        return labels[location] || location;
+    }
+
+    getLocationIcon(location) {
+        const icons = {
+            fridge: '❄️',
+            freezer: '🧊',
+            pantry: '🗄️'
+        };
+        return icons[location] || '📦';
+    }
+
+    getInventoryBadges(item, decayScore, confidence) {
+        const badges = [];
+
+        // Expiring soon badge
+        if (decayScore >= 70 && decayScore < 90) {
+            badges.push('<span class="kiq-badge kiq-badge-warning">⏰ Expiring Soon</span>');
+        }
+
+        // Expired badge
+        if (decayScore >= 90) {
+            badges.push('<span class="kiq-badge kiq-badge-danger">⚠️ Expired</span>');
+        }
+
+        // Low confidence badge
+        if (confidence < 0.7) {
+            badges.push('<span class="kiq-badge kiq-badge-info">❓ Needs Confirm</span>');
+        }
+
+        // Needs confirmation (not confirmed in 7+ days)
+        if (item.last_confirmed_at) {
+            const daysSinceConfirm = (new Date() - new Date(item.last_confirmed_at)) / (1000 * 60 * 60 * 24);
+            if (daysSinceConfirm > 7) {
+                badges.push('<span class="kiq-badge kiq-badge-info">🔄 Check Status</span>');
+            }
+        } else if (item.added_at) {
+            const daysSinceAdd = (new Date() - new Date(item.added_at)) / (1000 * 60 * 60 * 24);
+            if (daysSinceAdd > 7) {
+                badges.push('<span class="kiq-badge kiq-badge-info">🔄 Check Status</span>');
+            }
+        }
+
+        return badges.length > 0 ? `<div class="kiq-badges">${badges.join('')}</div>` : '';
     }
 
     addManualInventoryItem(e) {
@@ -2166,6 +2302,40 @@ class KitchenIQDashboard {
         this.inventory.splice(index, 1);
         this.saveInventory({ silent: true });
         this.renderInventory();
+    }
+
+    confirmInventoryItem(index) {
+        if (!this.inventory || !this.inventory[index]) return;
+        
+        // Update local item
+        const item = this.inventory[index];
+        item.last_confirmed_at = new Date().toISOString();
+        item.confidence = 1.0;
+        
+        // Save locally first
+        this.saveInventory({ silent: true });
+        
+        // Call backend to recalculate decay score
+        const itemId = item.id || item.name;
+        fetch(`${this.apiRoot}kitcheniq/v1/inventory/bulk-confirm`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-WP-Nonce': this.nonce
+            },
+            body: JSON.stringify({ item_ids: [itemId] })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                this.showNotification('Item confirmed fresh', 'success');
+                // Reload inventory to get updated decay scores
+                this.loadInventory();
+            }
+        })
+        .catch(err => {
+            console.error('Confirm item failed:', err);
+        });
     }
 
     // Pantry search state

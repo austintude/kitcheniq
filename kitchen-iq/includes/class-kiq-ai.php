@@ -33,10 +33,58 @@ class KIQ_AI {
             return new WP_Error( 'rate_limit', 'Meal generation limit reached for this week' );
         }
 
+        // **Phase 2: Freshness pre-check gate**
+        // Filter inventory by freshness before building meal prompt
+        $freshness = KIQ_Data::filter_inventory_by_freshness( $user_id );
+
+        $fresh_items         = $freshness['fresh'] ?? array();
+        $needs_confirm_items = $freshness['needs_confirm'] ?? array();
+        $expired_items       = $freshness['expired'] ?? array();
+
+        if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+            error_log( sprintf( 
+                "KIQ: Freshness gate - fresh=%d needs_confirm=%d expired=%d",
+                count( $fresh_items ),
+                count( $needs_confirm_items ),
+                count( $expired_items )
+            ) );
+        }
+
+        // If skip_freshness_gate option is set, use full inventory; otherwise use filtered
+        $use_inventory = isset( $options['skip_freshness_gate'] ) && $options['skip_freshness_gate']
+            ? $inventory
+            : $fresh_items;
+
+        // If there are items needing confirmation, optionally return them for user review
+        // (caller can handle by prompting user to confirm before retrying with skip_freshness_gate=true)
+        if ( empty( $use_inventory ) && ! empty( $needs_confirm_items ) ) {
+            return new WP_Error(
+                'freshness_check_required',
+                'Some inventory items need confirmation before meal planning.',
+                array(
+                    'needs_confirm' => $needs_confirm_items,
+                    'expired'       => $expired_items,
+                )
+            );
+        }
+
         // Assemble prompt based on tier
         $system_prompt = KIQ_Features::get_meal_prompt_for_tier( $user_id );
         
-        $user_message = self::build_meal_request_message( $profile, $inventory, $plan_type, $mood, $user_id, $options );
+        // Build meal request message with freshness-filtered inventory
+        $user_message = self::build_meal_request_message( $profile, $use_inventory, $plan_type, $mood, $user_id, $options );
+
+        // Add freshness context to prompt if we have items needing attention
+        if ( ! empty( $needs_confirm_items ) || ! empty( $expired_items ) ) {
+            $freshness_note = "\n\n--- FRESHNESS NOTE ---\n";
+            if ( ! empty( $expired_items ) ) {
+                $freshness_note .= sprintf( "Excluded %d expired item(s).\n", count( $expired_items ) );
+            }
+            if ( ! empty( $needs_confirm_items ) && ! ( isset( $options['skip_freshness_gate'] ) && $options['skip_freshness_gate'] ) ) {
+                $freshness_note .= sprintf( "Excluded %d item(s) needing user confirmation (age or low confidence).\n", count( $needs_confirm_items ) );
+            }
+            $user_message .= $freshness_note;
+        }
 
         $payload = array(
             'model'       => get_option( 'kiq_ai_text_model', 'gpt-4o-mini' ),

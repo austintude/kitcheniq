@@ -211,6 +211,78 @@ class KIQ_REST {
                 ),
             )
         );
+
+        // Reclassify inventory item (update location, category, etc.)
+        register_rest_route(
+            'kitcheniq/v1',
+            '/inventory/reclassify',
+            array(
+                'methods'             => 'POST',
+                'callback'            => array( __CLASS__, 'handle_inventory_reclassify' ),
+                'permission_callback' => array( __CLASS__, 'check_auth' ),
+                'args'                => array(
+                    'item_id'    => array( 'type' => 'string', 'required' => true ),
+                    'location'   => array( 'type' => 'string' ),
+                    'category'   => array( 'type' => 'string' ),
+                    'best_by'    => array( 'type' => 'string' ),
+                    'quantity'   => array( 'type' => 'number' ),
+                ),
+            )
+        );
+
+        // Bulk confirm inventory freshness
+        register_rest_route(
+            'kitcheniq/v1',
+            '/inventory/bulk-confirm',
+            array(
+                'methods'             => 'POST',
+                'callback'            => array( __CLASS__, 'handle_inventory_bulk_confirm' ),
+                'permission_callback' => array( __CLASS__, 'check_auth' ),
+                'args'                => array(
+                    'item_ids' => array( 'type' => 'array', 'required' => true ),
+                ),
+            )
+        );
+
+        // Get inventory grouped by location or category
+        register_rest_route(
+            'kitcheniq/v1',
+            '/inventory/grouped',
+            array(
+                'methods'             => 'GET',
+                'callback'            => array( __CLASS__, 'handle_inventory_grouped' ),
+                'permission_callback' => array( __CLASS__, 'check_auth' ),
+                'args'                => array(
+                    'group_by' => array(
+                        'type'    => 'string',
+                        'enum'    => array( 'location', 'category' ),
+                        'default' => 'location',
+                    ),
+                ),
+            )
+        );
+
+        // Get items needing confirmation
+        register_rest_route(
+            'kitcheniq/v1',
+            '/inventory/needs-confirm',
+            array(
+                'methods'             => 'GET',
+                'callback'            => array( __CLASS__, 'handle_inventory_needs_confirm' ),
+                'permission_callback' => array( __CLASS__, 'check_auth' ),
+            )
+        );
+
+        // Get freshness-filtered inventory (for meal gen pre-check)
+        register_rest_route(
+            'kitcheniq/v1',
+            '/inventory/freshness',
+            array(
+                'methods'             => 'GET',
+                'callback'            => array( __CLASS__, 'handle_inventory_freshness' ),
+                'permission_callback' => array( __CLASS__, 'check_auth' ),
+            )
+        );
     }
 
     /**
@@ -1556,5 +1628,141 @@ class KIQ_REST {
         echo "event: " . esc_attr( $event_type ) . "\n";
         echo "data: " . $json . "\n\n";
         flush();
+    }
+
+    /**
+     * Handle inventory reclassification
+     */
+    public static function handle_inventory_reclassify( $request ) {
+        $user_id = get_current_user_id();
+        $params  = $request->get_json_params();
+
+        $item_id  = sanitize_text_field( $params['item_id'] ?? '' );
+        $location = isset( $params['location'] ) ? sanitize_text_field( $params['location'] ) : null;
+        $category = isset( $params['category'] ) ? sanitize_text_field( $params['category'] ) : null;
+        $best_by  = isset( $params['best_by'] ) ? sanitize_text_field( $params['best_by'] ) : null;
+        $quantity = isset( $params['quantity'] ) ? floatval( $params['quantity'] ) : null;
+
+        if ( empty( $item_id ) ) {
+            return new WP_REST_Response( array( 'error' => 'missing_item_id' ), 400 );
+        }
+
+        $inventory = KIQ_Data::get_inventory( $user_id );
+        $found     = false;
+
+        foreach ( $inventory as &$item ) {
+            if ( ( isset( $item['id'] ) && $item['id'] === $item_id ) || $item['name'] === $item_id ) {
+                if ( $location !== null ) {
+                    $item['location'] = $location;
+                }
+                if ( $category !== null ) {
+                    $item['category'] = $category;
+                }
+                if ( $best_by !== null ) {
+                    $item['best_by'] = $best_by;
+                }
+                if ( $quantity !== null ) {
+                    $item['quantity'] = $quantity;
+                }
+
+                // Update last_confirmed_at
+                $item['last_confirmed_at'] = current_time( 'mysql' );
+
+                // Recalculate decay score
+                $item = KIQ_Data::normalize_inventory_item( $item );
+                $item['decay_score'] = KIQ_Data::calculate_decay_score( $item );
+
+                $found = true;
+                break;
+            }
+        }
+
+        if ( ! $found ) {
+            return new WP_REST_Response( array( 'error' => 'item_not_found' ), 404 );
+        }
+
+        KIQ_Data::save_inventory( $user_id, $inventory );
+
+        return new WP_REST_Response( array( 'success' => true, 'item' => $item ), 200 );
+    }
+
+    /**
+     * Handle bulk inventory confirmation
+     */
+    public static function handle_inventory_bulk_confirm( $request ) {
+        $user_id  = get_current_user_id();
+        $params   = $request->get_json_params();
+        $item_ids = $params['item_ids'] ?? array();
+
+        if ( ! is_array( $item_ids ) || empty( $item_ids ) ) {
+            return new WP_REST_Response( array( 'error' => 'missing_item_ids' ), 400 );
+        }
+
+        $item_ids  = array_map( 'sanitize_text_field', $item_ids );
+        $inventory = KIQ_Data::get_inventory( $user_id );
+        $confirmed = 0;
+
+        foreach ( $inventory as &$item ) {
+            $id = $item['id'] ?? $item['name'];
+            if ( in_array( $id, $item_ids, true ) ) {
+                $item['last_confirmed_at'] = current_time( 'mysql' );
+                $item['confidence']        = 1.0;
+                $item = KIQ_Data::normalize_inventory_item( $item );
+                $item['decay_score'] = KIQ_Data::calculate_decay_score( $item );
+                $confirmed++;
+            }
+        }
+
+        if ( $confirmed > 0 ) {
+            KIQ_Data::save_inventory( $user_id, $inventory );
+        }
+
+        return new WP_REST_Response( array(
+            'success'   => true,
+            'confirmed' => $confirmed,
+        ), 200 );
+    }
+
+    /**
+     * Get grouped inventory (by location or category)
+     */
+    public static function handle_inventory_grouped( $request ) {
+        $user_id  = get_current_user_id();
+        $group_by = $request->get_param( 'group_by' ) ?: 'location';
+
+        // Refresh decay scores
+        KIQ_Data::refresh_inventory_status( $user_id );
+
+        $grouped = KIQ_Data::get_inventory_grouped( $user_id, $group_by );
+
+        return new WP_REST_Response( array( 'inventory' => $grouped ), 200 );
+    }
+
+    /**
+     * Get items needing confirmation
+     */
+    public static function handle_inventory_needs_confirm( $request ) {
+        $user_id = get_current_user_id();
+
+        // Refresh decay scores
+        KIQ_Data::refresh_inventory_status( $user_id );
+
+        $needs_confirm = KIQ_Data::get_items_needing_confirmation( $user_id );
+
+        return new WP_REST_Response( array( 'items' => $needs_confirm ), 200 );
+    }
+
+    /**
+     * Get freshness-filtered inventory (for meal gen pre-check)
+     */
+    public static function handle_inventory_freshness( $request ) {
+        $user_id = get_current_user_id();
+
+        // Refresh decay scores
+        KIQ_Data::refresh_inventory_status( $user_id );
+
+        $filtered = KIQ_Data::filter_inventory_by_freshness( $user_id );
+
+        return new WP_REST_Response( $filtered, 200 );
     }
 }

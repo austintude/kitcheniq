@@ -746,6 +746,134 @@ body:has(.kiq-app) .main-navigation {
 }
 .kiq-remove-btn:hover { background: #dc2626; color: #ffffff; }
 
+/* Phase 2: Confirm button */
+.kiq-confirm-btn {
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    border-radius: 50%;
+    background: #d1fae5;
+    border: 1px solid #6ee7b7;
+    color: #065f46;
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+.kiq-confirm-btn:hover { 
+    background: #10b981; 
+    color: #ffffff;
+    border-color: #10b981;
+}
+
+/* Phase 2: Inventory grouping */
+.kiq-inventory-group {
+    margin-bottom: 32px;
+}
+
+.kiq-group-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 16px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--kiq-border);
+    color: var(--kiq-ink);
+}
+
+.kiq-location-icon {
+    font-size: 24px;
+}
+
+.kiq-group-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--kiq-surface-subtle);
+    color: var(--kiq-muted);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 999px;
+    min-width: 24px;
+}
+
+/* Phase 2: Status badges */
+.kiq-status.kiq-status-fresh { 
+    background: #d1fae5; 
+    color: #065f46;
+    border: 1px solid #a7f3d0;
+}
+
+.kiq-status.kiq-status-nearing { 
+    background: #fef3c7; 
+    color: #92400e;
+    border: 1px solid #fde68a;
+}
+
+.kiq-status.kiq-status-expired { 
+    background: #fee2e2; 
+    color: #991b1b;
+    border: 1px solid #fecaca;
+}
+
+.kiq-status.kiq-status-low { 
+    background: #fff7ed; 
+    color: #c2410c; 
+    border: 1px solid #fed7aa; 
+}
+
+.kiq-status.kiq-status-out { 
+    background: #fef2f2; 
+    color: #b91c1c; 
+    border: 1px solid #fecdd3; 
+}
+
+/* Phase 2: Item badges */
+.kiq-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.kiq-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.kiq-badge-warning {
+    background: #fef3c7;
+    color: #92400e;
+    border: 1px solid #fde68a;
+}
+
+.kiq-badge-danger {
+    background: #fee2e2;
+    color: #991b1b;
+    border: 1px solid #fecaca;
+}
+
+.kiq-badge-info {
+    background: #dbeafe;
+    color: #1e40af;
+    border: 1px solid #bfdbfe;
+}
+
 .kiq-generator-controls {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

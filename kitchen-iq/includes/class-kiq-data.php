@@ -310,6 +310,88 @@ class KIQ_Data {
     }
 
     /**
+     * Normalize inventory item with extended schema
+     * Adds: added_at, best_by, last_confirmed_at, location, category, quantity, confidence, decay_score
+     */
+    public static function normalize_inventory_item( $item ) {
+        $defaults = array(
+            'id'                 => $item['id'] ?? uniqid( 'item_' ),
+            'name'               => $item['name'] ?? '',
+            'added_at'           => $item['added_at'] ?? current_time( 'mysql' ),
+            'best_by'            => $item['best_by'] ?? null,
+            'last_confirmed_at'  => $item['last_confirmed_at'] ?? null,
+            'location'           => $item['location'] ?? 'pantry', // pantry, fridge, freezer
+            'category'           => $item['category'] ?? 'other',  // meats, veg, condiments, dry, spices, drinks, prepared, other
+            'quantity'           => $item['quantity'] ?? 1,
+            'quantity_level'     => $item['quantity_level'] ?? 'full',
+            'confidence'         => $item['confidence'] ?? 1.0,
+            'status'             => $item['status'] ?? 'fresh',
+            'perishability_days' => $item['perishability_days'] ?? null,
+            'permanence'         => $item['permanence'] ?? 'temporary',
+            'decay_score'        => $item['decay_score'] ?? 0,
+        );
+
+        return array_merge( $defaults, $item );
+    }
+
+    /**
+     * Calculate decay score for an inventory item
+     * Returns 0-100: 0=fresh, 100=expired/likely used
+     */
+    public static function calculate_decay_score( $item ) {
+        $now = current_time( 'timestamp' );
+
+        // If explicitly expired, max score
+        if ( isset( $item['best_by'] ) && $item['best_by'] ) {
+            $best_by = strtotime( $item['best_by'] );
+            if ( $best_by && $now > $best_by ) {
+                return 100;
+            }
+        }
+
+        // Use perishability_days or best_by to estimate freshness
+        $added_at = isset( $item['added_at'] ) && $item['added_at'] 
+            ? strtotime( $item['added_at'] ) 
+            : $now;
+
+        $age_days = ( $now - $added_at ) / DAY_IN_SECONDS;
+
+        // If we have explicit best_by
+        if ( isset( $item['best_by'] ) && $item['best_by'] ) {
+            $best_by = strtotime( $item['best_by'] );
+            $shelf_life_days = ( $best_by - $added_at ) / DAY_IN_SECONDS;
+            if ( $shelf_life_days > 0 ) {
+                $decay = ( $age_days / $shelf_life_days ) * 100;
+                return min( 100, max( 0, $decay ) );
+            }
+        }
+
+        // Fall back to perishability_days
+        if ( isset( $item['perishability_days'] ) && $item['perishability_days'] > 0 ) {
+            $decay = ( $age_days / $item['perishability_days'] ) * 100;
+            return min( 100, max( 0, $decay ) );
+        }
+
+        // Permanent items decay slowly
+        if ( isset( $item['permanence'] ) && $item['permanence'] === 'permanent' ) {
+            return 0;
+        }
+
+        // Default heuristic: age-based for unknown items
+        if ( $age_days > 30 ) {
+            return 90;
+        }
+        if ( $age_days > 14 ) {
+            return 60;
+        }
+        if ( $age_days > 7 ) {
+            return 30;
+        }
+
+        return max( 0, $age_days * 3 );
+    }
+
+    /**
      * Refresh inventory status based on time and perishability
      */
     public static function refresh_inventory_status( $user_id ) {
@@ -322,26 +404,16 @@ class KIQ_Data {
         $updated = false;
 
         foreach ( $inventory as &$item ) {
-            if ( ! isset( $item['perishability_days'] ) ) {
-                continue;
-            }
+            // Normalize item with extended schema
+            $item = self::normalize_inventory_item( $item );
 
-            $added_at = isset( $item['added_at'] ) ? strtotime( $item['added_at'] ) : time();
-            $expiry   = $added_at + ( $item['perishability_days'] * DAY_IN_SECONDS );
-            $now      = time();
+            // Recalculate decay score
+            $item['decay_score'] = self::calculate_decay_score( $item );
 
-            // Calculate days since expiry
-            $days_since_expiry = ( $now - $expiry ) / DAY_IN_SECONDS;
-
-            if ( $days_since_expiry > 0 ) {
-                // Past expiry
-                if ( $days_since_expiry > 1 ) {
-                    $item['status'] = 'expired';
-                } else {
-                    $item['status'] = 'nearing';
-                }
-            } elseif ( $days_since_expiry > -1 ) {
-                // Within 1 day of expiry
+            // Update status based on decay score
+            if ( $item['decay_score'] >= 90 ) {
+                $item['status'] = 'expired';
+            } elseif ( $item['decay_score'] >= 70 ) {
                 $item['status'] = 'nearing';
             } else {
                 $item['status'] = 'fresh';
@@ -353,6 +425,121 @@ class KIQ_Data {
         if ( $updated ) {
             self::save_inventory( $user_id, $inventory );
         }
+    }
+
+    /**
+     * Get inventory grouped by location or category
+     */
+    public static function get_inventory_grouped( $user_id, $group_by = 'location' ) {
+        $inventory = self::get_inventory( $user_id );
+
+        if ( empty( $inventory ) ) {
+            return array();
+        }
+
+        $grouped = array();
+
+        foreach ( $inventory as $item ) {
+            $item = self::normalize_inventory_item( $item );
+            $key = $item[ $group_by ] ?? 'other';
+            if ( ! isset( $grouped[ $key ] ) ) {
+                $grouped[ $key ] = array();
+            }
+            $grouped[ $key ][] = $item;
+        }
+
+        return $grouped;
+    }
+
+    /**
+     * Get items requiring confirmation (high decay, low confidence, or stale)
+     */
+    public static function get_items_needing_confirmation( $user_id ) {
+        $inventory = self::get_inventory( $user_id );
+
+        if ( empty( $inventory ) ) {
+            return array();
+        }
+
+        $needs_confirmation = array();
+        $now = current_time( 'timestamp' );
+
+        foreach ( $inventory as $item ) {
+            $item = self::normalize_inventory_item( $item );
+
+            // Flag items that need confirmation
+            $needs_confirm = false;
+
+            // High decay score
+            if ( $item['decay_score'] >= 70 ) {
+                $needs_confirm = true;
+            }
+
+            // Low confidence from vision
+            if ( isset( $item['confidence'] ) && $item['confidence'] < 0.7 ) {
+                $needs_confirm = true;
+            }
+
+            // Not confirmed in 7+ days
+            if ( isset( $item['last_confirmed_at'] ) && $item['last_confirmed_at'] ) {
+                $last_confirmed = strtotime( $item['last_confirmed_at'] );
+                $days_since_confirm = ( $now - $last_confirmed ) / DAY_IN_SECONDS;
+                if ( $days_since_confirm > 7 ) {
+                    $needs_confirm = true;
+                }
+            } elseif ( isset( $item['added_at'] ) && $item['added_at'] ) {
+                $added = strtotime( $item['added_at'] );
+                $days_since_add = ( $now - $added ) / DAY_IN_SECONDS;
+                if ( $days_since_add > 7 ) {
+                    $needs_confirm = true;
+                }
+            }
+
+            if ( $needs_confirm ) {
+                $needs_confirmation[] = $item;
+            }
+        }
+
+        return $needs_confirmation;
+    }
+
+    /**
+     * Filter inventory for freshness gate before meal generation
+     * Returns: array( 'fresh' => [], 'needs_confirm' => [], 'expired' => [] )
+     */
+    public static function filter_inventory_by_freshness( $user_id ) {
+        $inventory = self::get_inventory( $user_id );
+
+        if ( empty( $inventory ) ) {
+            return array(
+                'fresh'         => array(),
+                'needs_confirm' => array(),
+                'expired'       => array(),
+            );
+        }
+
+        $fresh = array();
+        $needs_confirm = array();
+        $expired = array();
+
+        foreach ( $inventory as $item ) {
+            $item = self::normalize_inventory_item( $item );
+            $item['decay_score'] = self::calculate_decay_score( $item );
+
+            if ( $item['decay_score'] >= 90 ) {
+                $expired[] = $item;
+            } elseif ( $item['decay_score'] >= 60 || ( isset( $item['confidence'] ) && $item['confidence'] < 0.7 ) ) {
+                $needs_confirm[] = $item;
+            } else {
+                $fresh[] = $item;
+            }
+        }
+
+        return array(
+            'fresh'         => $fresh,
+            'needs_confirm' => $needs_confirm,
+            'expired'       => $expired,
+        );
     }
 
     /**
