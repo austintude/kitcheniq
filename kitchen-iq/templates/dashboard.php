@@ -519,6 +519,7 @@
                                 <p class="kiq-muted">Starts with rear camera by default. Tap the camera button to toggle between front and rear.</p>
                             </div>
                             <div class="kiq-live-actions">
+                                <button id="kiq-store-mode-inline" class="btn btn-ghost">Open Store Mode</button>
                                 <button id="kiq-live-start" class="btn btn-primary">Start Coach</button>
                             </div>
                         </div>
@@ -531,6 +532,7 @@
                             <button id="kiq-live-stop" class="btn btn-ghost">Stop</button>
                             <span id="kiq-live-status" class="kiq-muted">Tap Start to begin</span>
                         </div>
+                        <p class="kiq-muted" style="margin-top: 10px; font-size: 0.92em;">Tip: tap Open Store Mode or say "I'm at the store" to pop open the store checklist.</p>
                         <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--kiq-border);">
                             <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                                 <input type="checkbox" id="kiq-live-tts-toggle" style="width: 16px; height: 16px;">

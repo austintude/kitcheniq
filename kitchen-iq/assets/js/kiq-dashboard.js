@@ -467,6 +467,10 @@ class KitchenIQDashboard {
         if (liveStartBtn) {
             liveStartBtn.addEventListener('click', () => this.toggleLiveSession());
         }
+        const storeInlineBtn = document.getElementById('kiq-store-mode-inline');
+        if (storeInlineBtn) {
+            storeInlineBtn.addEventListener('click', () => this.openStoreMode());
+        }
         const liveStopBtn = document.getElementById('kiq-live-stop');
         if (liveStopBtn) {
             liveStopBtn.addEventListener('click', () => this.stopLiveSession());
@@ -1619,6 +1623,13 @@ class KitchenIQDashboard {
                 
                 // If we have text, send it
                 if (text) {
+                    // Store Mode voice shortcut from Coach flow (non-streaming)
+                    if (this.shouldOpenStoreMode(text)) {
+                        this.setLiveStatus('Opening Store Mode...');
+                        this.openStoreMode();
+                        return;
+                    }
+
                     this.setLiveStatus('Sending to Coach...');
                     const frame = await this.captureLiveFrame();
                     await this.sendLiveAssist(text, frame);
@@ -1645,6 +1656,12 @@ class KitchenIQDashboard {
                 await this.sendLiveAssist(transcript);
             }
         }
+    }
+
+    shouldOpenStoreMode(text) {
+        if (!text) return false;
+        const t = text.toLowerCase();
+        return /\b(i'm|im)\s+at\s+the\s+store\b/.test(t) || /\bstore\s+mode\b/.test(t);
     }
 
     /**
