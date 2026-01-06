@@ -24,6 +24,7 @@ class KitchenIQDashboard {
         this.liveUsingRearCamera = true;
         this.liveTtsEnabled = false;
         this.liveLatestFrame = null;
+        this.lastStoreData = null;
         this.stapleItems = [
             'salt',
             'pepper',
@@ -114,6 +115,18 @@ class KitchenIQDashboard {
         }
 
         // PWA registration now happens in constructor via registerServiceWorker()
+
+        // Inject Store Mode button (floating action) for quick access
+        this.injectStoreModeButton();
+
+        // Restore Store Mode overlay state if user left it open
+        try {
+            if (localStorage.getItem('kiq_store_overlay_open') === 'true') {
+                this.openStoreMode();
+            }
+        } catch (e) {
+            // ignore storage errors
+        }
     }
 
     async loadProfile() {
@@ -489,6 +502,164 @@ class KitchenIQDashboard {
                 if (topNav) topNav.classList.toggle('hidden');
             });
         }
+    }
+
+    injectStoreModeButton() {
+        try {
+            if (document.getElementById('kiq-store-mode-btn')) return;
+            const btn = document.createElement('button');
+            btn.id = 'kiq-store-mode-btn';
+            btn.className = 'kiq-fab-store';
+            btn.title = "I'm at the store";
+            btn.ariaLabel = "I'm at the store";
+            btn.textContent = '🛒';
+            btn.addEventListener('click', () => this.openStoreMode());
+            document.body.appendChild(btn);
+        } catch (e) {
+            // no-op
+        }
+    }
+
+    async openStoreMode() {
+        // Create overlay container if missing
+        let overlay = document.getElementById('kiq-store-overlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'kiq-store-overlay';
+            overlay.className = 'kiq-store-overlay';
+            overlay.innerHTML = `
+                <div class="kiq-store-panel">
+                    <div class="kiq-store-header">
+                        <h3>Store Mode</h3>
+                        <div class="kiq-store-actions">
+                            <button class="kiq-store-btn" id="kiq-store-copy" type="button">Copy list</button>
+                            <button class="kiq-store-btn" id="kiq-store-csv" type="button">Download CSV</button>
+                            <button class="kiq-store-close" aria-label="Close" type="button">✕</button>
+                        </div>
+                    </div>
+                    <div class="kiq-store-content">
+                        <div class="kiq-store-section">
+                            <h4>Buy List</h4>
+                            <div id="kiq-store-buy-list" class="kiq-store-list"></div>
+                        </div>
+                        <div class="kiq-store-section">
+                            <h4>Use Soon (Prioritize)</h4>
+                            <div id="kiq-store-prioritize" class="kiq-store-list"></div>
+                        </div>
+                        <div class="kiq-store-section">
+                            <h4>Already in Pantry</h4>
+                            <div id="kiq-store-in-pantry" class="kiq-store-list"></div>
+                        </div>
+                    </div>
+                </div>`;
+            document.body.appendChild(overlay);
+            overlay.querySelector('.kiq-store-close')?.addEventListener('click', () => this.closeStoreOverlay());
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) this.closeStoreOverlay();
+            });
+            overlay.querySelector('#kiq-store-copy')?.addEventListener('click', () => this.copyBuyListToClipboard());
+            overlay.querySelector('#kiq-store-csv')?.addEventListener('click', () => this.downloadBuyListCsv());
+        }
+
+        overlay.style.display = 'flex';
+        try { localStorage.setItem('kiq_store_overlay_open', 'true'); } catch (e) {}
+        await this.fetchAndRenderStoreRecommendations();
+    }
+
+    async fetchAndRenderStoreRecommendations() {
+        try {
+            const res = await fetch(`${this.apiRoot}kitcheniq/v1/store-mode/recommendations`, {
+                headers: { 'X-WP-Nonce': this.nonce },
+            });
+            const data = await res.json();
+            this.renderStoreRecommendations(data || {});
+        } catch (e) {
+            console.error('Store Mode fetch failed', e);
+            this.showNotification('Could not load store recommendations', 'error');
+        }
+    }
+
+    renderStoreRecommendations(data) {
+        this.lastStoreData = data;
+        const buyListEl = document.getElementById('kiq-store-buy-list');
+        const priorEl   = document.getElementById('kiq-store-prioritize');
+        const inPantryEl= document.getElementById('kiq-store-in-pantry');
+        if (!buyListEl || !priorEl || !inPantryEl) return;
+
+        const buy = Array.isArray(data.buy_list) ? data.buy_list : [];
+        const pri = Array.isArray(data.prioritize) ? data.prioritize : [];
+        const pan = Array.isArray(data.in_pantry) ? data.in_pantry : [];
+
+        buyListEl.innerHTML = buy.length ? buy.map(item => {
+            const subs = (item.substitutions || []).map(s => `<span class="kiq-badge kiq-badge-info">Use: ${this.escapeHtml(s.name)}</span>`).join(' ');
+            const reason = item.reason === 'expired' ? 'Expired' : (item.reason === 'low' ? 'Low' : 'Missing');
+            return `<div class="kiq-store-row">
+                <div>
+                    <div class="kiq-row-title">${this.escapeHtml(item.name)} ${item.quantity ? `<span class="kiq-pill-muted">x${item.quantity}</span>` : ''}</div>
+                    <div class="kiq-row-sub">Reason: ${reason} ${subs ? `• ${subs}` : ''}</div>
+                </div>
+                <button class="kiq-add-to-list">Add</button>
+            </div>`;
+        }).join('') : '<div class="kiq-empty">No items to buy 🎉</div>';
+
+        priorEl.innerHTML = pri.length ? pri.map(p => `<div class="kiq-store-row">
+            <div>
+                <div class="kiq-row-title">${this.escapeHtml(p.name)} <span class="kiq-badge kiq-badge-warning">⏰ ${Math.round(p.decay)}%</span></div>
+                <div class="kiq-row-sub">${this.escapeHtml(p.location)} • ${this.escapeHtml(p.category)}</div>
+            </div>
+        </div>`).join('') : '<div class="kiq-empty">Nothing urgent</div>';
+
+        inPantryEl.innerHTML = pan.length ? pan.map(p => `<div class="kiq-store-row">
+            <div>
+                <div class="kiq-row-title">${this.escapeHtml(p.name)} ${p.quantity ? `<span class=\"kiq-pill-muted\">x${p.quantity}</span>` : ''}</div>
+                <div class="kiq-row-sub">${this.escapeHtml(p.location || 'pantry')}</div>
+            </div>
+        </div>`).join('') : '<div class="kiq-empty">No matches</div>';
+    }
+
+    closeStoreOverlay() {
+        const overlay = document.getElementById('kiq-store-overlay');
+        if (!overlay) return;
+        overlay.style.display = 'none';
+        try { localStorage.setItem('kiq_store_overlay_open', 'false'); } catch (e) {}
+    }
+
+    copyBuyListToClipboard() {
+        const buy = (this.lastStoreData && Array.isArray(this.lastStoreData.buy_list)) ? this.lastStoreData.buy_list : [];
+        if (!buy.length) {
+            this.showNotification('No buy items to copy', 'info');
+            return;
+        }
+        const lines = buy.map(item => `${item.name}${item.quantity ? ` x${item.quantity}` : ''}`);
+        const text = lines.join('\n');
+        navigator.clipboard.writeText(text)
+            .then(() => this.showNotification('Buy list copied', 'success'))
+            .catch(() => this.showNotification('Copy failed', 'error'));
+    }
+
+    downloadBuyListCsv() {
+        const buy = (this.lastStoreData && Array.isArray(this.lastStoreData.buy_list)) ? this.lastStoreData.buy_list : [];
+        if (!buy.length) {
+            this.showNotification('No buy items to export', 'info');
+            return;
+        }
+        const header = ['name', 'quantity', 'reason'];
+        const rows = buy.map(item => [
+            item.name ? `"${item.name.replace(/"/g, '""')}"` : '',
+            item.quantity ?? '',
+            item.reason ?? ''
+        ]);
+        const csv = [header.join(','), ...rows.map(r => r.join(','))].join('\n');
+
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'store-buy-list.csv';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
     }
 
     /* Members UI */
@@ -1500,6 +1671,7 @@ class KitchenIQDashboard {
                     'Content-Type': 'application/json',
                     'X-WP-Nonce': this.nonce,
                 },
+                body: JSON.stringify(payload),
             });
             
             if (!res.ok) {
@@ -1515,6 +1687,7 @@ class KitchenIQDashboard {
             let buffer = '';
             let itemsDetected = [];
             let actions = [];
+            let currentEvent = null;
             
             while (true) {
                 const { done, value } = await reader.read();
@@ -1526,21 +1699,26 @@ class KitchenIQDashboard {
                 
                 for (const line of lines) {
                     if (line.startsWith('event: ')) {
-                        // No-op, already handled below
+                        currentEvent = line.substring(7).trim();
                     } else if (line.startsWith('data: ')) {
                         const jsonStr = line.substring(6);
                         try {
-                            const event = JSON.parse(jsonStr);
-                            
-                            if (event.event === 'intent') {
-                                itemsDetected = event.items_detected || [];
-                                actions = event.actions || [];
+                            const payload = JSON.parse(jsonStr);
+                            const type = currentEvent || payload.event || '';
+
+                            if (type === 'intent') {
+                                itemsDetected = payload.items_detected || [];
+                                actions = payload.actions || [];
                                 if (itemsDetected.length > 0) {
                                     this.setLiveStatus(`Detected: ${itemsDetected.join(', ')}`);
                                 }
-                            } else if (event.event === 'suggestion') {
-                                this.appendLiveMessage('Coach', event.message);
-                            } else if (event.event === 'done') {
+                            } else if (type === 'suggestion') {
+                                if (payload.message) this.appendLiveMessage('Coach', payload.message);
+                            } else if (type === 'store_mode') {
+                                this.appendLiveMessage('System', payload.message || 'Opening Store Mode…');
+                                // Open Store Mode overlay
+                                this.openStoreMode();
+                            } else if (type === 'done') {
                                 this.setLiveStatus('Voice processed');
                             }
                         } catch (parseErr) {

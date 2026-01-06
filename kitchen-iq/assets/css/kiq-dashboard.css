@@ -874,6 +874,63 @@ body:has(.kiq-app) .main-navigation {
     border: 1px solid #bfdbfe;
 }
 
+/* Store Mode floating action button */
+#kiq-store-mode-btn.kiq-fab-store {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    width: 54px;
+    height: 54px;
+    border-radius: 50%;
+    background: #0ea5e9;
+    color: #fff;
+    border: none;
+    box-shadow: 0 12px 24px rgba(14, 165, 233, 0.35);
+    cursor: pointer;
+    font-size: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+}
+#kiq-store-mode-btn.kiq-fab-store:hover { filter: brightness(0.95); }
+
+/* Store Mode overlay */
+.kiq-store-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.48);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 9998;
+    padding: 20px;
+}
+.kiq-store-panel {
+    width: min(980px, 96vw);
+    max-height: 90vh;
+    overflow: hidden;
+    background: #fff;
+    border: 1px solid var(--kiq-border);
+    border-radius: 16px;
+    box-shadow: var(--kiq-shadow);
+    display: flex;
+    flex-direction: column;
+}
+.kiq-store-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px; border-bottom: 1px solid var(--kiq-border); }
+.kiq-store-header h3 { margin: 0; font-size: 18px; }
+.kiq-store-close { border: none; background: transparent; font-size: 18px; cursor: pointer; color: var(--kiq-muted); }
+.kiq-store-close:hover { color: var(--kiq-ink); }
+.kiq-store-content { padding: 16px 18px; overflow: auto; display: grid; gap: 16px; grid-template-columns: 1fr; }
+.kiq-store-section h4 { margin: 0 0 8px 0; font-size: 14px; color: var(--kiq-muted); }
+.kiq-store-list { display: grid; gap: 10px; }
+.kiq-store-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid var(--kiq-border); border-radius: 12px; padding: 12px 14px; background: #fff; }
+.kiq-row-title { font-weight: 700; }
+.kiq-row-sub { font-size: 12px; color: var(--kiq-muted); margin-top: 4px; }
+.kiq-add-to-list { border: 1px solid var(--kiq-border); background: var(--kiq-surface-subtle); border-radius: 10px; padding: 8px 12px; cursor: pointer; }
+.kiq-add-to-list:hover { background: #e5f3ff; border-color: #cce7ff; }
+.kiq-badges { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+
 .kiq-generator-controls {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
