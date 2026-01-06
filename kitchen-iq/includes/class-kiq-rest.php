@@ -195,6 +195,22 @@ class KIQ_REST {
                 ),
             )
         );
+
+        // Stream voice endpoint: Accepts audio chunks and returns streaming text/intent.
+        // Uses Server-Sent Events (SSE) to stream responses back to client
+        register_rest_route(
+            'kitcheniq/v1',
+            '/stream/voice',
+            array(
+                'methods'             => 'POST',
+                'callback'            => array( __CLASS__, 'handle_stream_voice' ),
+                'permission_callback' => array( __CLASS__, 'check_auth' ),
+                'args'                => array(
+                    'audio_chunk' => array( 'type' => 'string' ), // base64 audio chunk (WAV/MP3 format)
+                    'transcript'  => array( 'type' => 'string' ), // partial transcript (from browser ASR)
+                ),
+            )
+        );
     }
 
     /**
@@ -1427,7 +1443,118 @@ class KIQ_REST {
 
         return new WP_REST_Response( $diagnostics, 200 );
     }
-}
 
-// Initialize REST API
-KIQ_REST::init();
+    /**
+     * Handle streaming voice input: processes audio chunk and transcript,
+     * returns streaming text response via SSE. For Phase 1, streams interim
+     * transcription + intent parsing to the frontend.
+     */
+    public static function handle_stream_voice( $request ) {
+        $user_id = get_current_user_id();
+
+        if ( ! KIQ_Features::allows( $user_id, 'voice_assist' ) ) {
+            return new WP_REST_Response( 
+                array( 'error' => 'not_allowed', 'message' => 'Voice assist is a Pro feature.' ), 
+                403 
+            );
+        }
+
+        $params           = $request->get_json_params();
+        $audio_chunk_b64  = isset( $params['audio_chunk'] ) ? sanitize_text_field( $params['audio_chunk'] ) : '';
+        $transcript       = isset( $params['transcript'] ) ? sanitize_textarea_field( $params['transcript'] ) : '';
+
+        if ( empty( $transcript ) && empty( $audio_chunk_b64 ) ) {
+            return new WP_REST_Response( 
+                array( 'error' => 'missing_input', 'message' => 'Provide either transcript or audio_chunk.' ), 
+                400 
+            );
+        }
+
+        // For Phase 1: stream intent parsing off the transcript (or live frame detection).
+        // The frontend will handle mic streaming via Web Speech API; we focus on intent here.
+        // Return streaming SSE response: https://html.spec.whatwg.org/multipage/server-sent-events.html
+
+        header( 'Content-Type: text/event-stream' );
+        header( 'Cache-Control: no-cache' );
+        header( 'Connection: keep-alive' );
+
+        if ( ob_get_level() > 0 ) {
+            ob_end_clean();
+        }
+
+        // Send initial "connected" event
+        self::send_sse_event( 'connected', array( 'message' => 'Voice stream connected.' ) );
+
+        // Parse transcript for intents: items to add, remove, confirm, etc.
+        $intents = self::parse_voice_intents( $transcript );
+
+        // Stream back interim intents
+        self::send_sse_event( 'intent', array(
+            'transcript'     => $transcript,
+            'items_detected' => $intents['items'] ?? array(),
+            'actions'        => $intents['actions'] ?? array(),
+        ) );
+
+        // If transcript contains meal-related keywords, offer a snippet
+        if ( preg_match( '/\b(what|recipe|cook|meal|dinner|lunch|breakfast)\b/i', $transcript ) ) {
+            self::send_sse_event( 'suggestion', array(
+                'message' => 'I can help you plan a meal! Would you like me to suggest recipes?',
+            ) );
+        }
+
+        // Send completion event
+        self::send_sse_event( 'done', array( 'message' => 'Voice input processed.' ) );
+
+        // Flush and exit
+        flush();
+        exit;
+    }
+
+    /**
+     * Simple intent parser for voice input (Phase 1 placeholder)
+     * Detects common pantry/inventory patterns from transcript text
+     */
+    private static function parse_voice_intents( $transcript ) {
+        $items   = array();
+        $actions = array();
+
+        if ( empty( $transcript ) ) {
+            return array( 'items' => $items, 'actions' => $actions );
+        }
+
+        // Simple heuristic patterns (can be upgraded to LLM-based parsing later)
+        // "I have X" or "Add X" -> add item
+        if ( preg_match_all( '/(?:have|add|added|got|bought)\s+(?:the\s+)?(\w+(?:\s+\w+)?)/i', $transcript, $matches ) ) {
+            foreach ( $matches[1] as $item ) {
+                $item = strtolower( trim( $item ) );
+                if ( ! in_array( $item, $items ) ) {
+                    $items[] = $item;
+                    $actions[] = array( 'action' => 'add', 'item' => $item );
+                }
+            }
+        }
+
+        // "Used X" or "Remove X" -> remove/decrement item
+        if ( preg_match_all( '/(?:used|removed|ate|finished|out of)\s+(?:the\s+)?(\w+(?:\s+\w+)?)/i', $transcript, $matches ) ) {
+            foreach ( $matches[1] as $item ) {
+                $item = strtolower( trim( $item ) );
+                if ( ! in_array( $item, $items ) ) {
+                    $items[] = $item;
+                    $actions[] = array( 'action' => 'remove', 'item' => $item );
+                }
+            }
+        }
+
+        return array( 'items' => $items, 'actions' => $actions );
+    }
+
+    /**
+     * Send Server-Sent Event (SSE) formatted response
+     */
+    private static function send_sse_event( $event_type, $data ) {
+        $json = wp_json_encode( $data );
+        echo "event: " . esc_attr( $event_type ) . "\n";
+        echo "data: " . $json . "\n\n";
+        flush();
+    }
+}

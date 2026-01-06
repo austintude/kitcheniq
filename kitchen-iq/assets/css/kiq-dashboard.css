@@ -998,3 +998,123 @@ body:has(.kiq-app) .main-navigation {
     flex: 1;
     min-width: 150px;
 }
+
+/* Streaming UI States */
+.kiq-live-status-connecting {
+    display: inline-block;
+    padding: 6px 12px;
+    background: var(--kiq-warn-soft);
+    color: #b45309;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    margin-top: 8px;
+}
+
+.kiq-live-status-listening {
+    display: inline-block;
+    padding: 6px 12px;
+    background: rgba(220, 38, 38, 0.1);
+    color: #dc2626;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    margin-top: 8px;
+    animation: pulse-subtle 1.5s ease-in-out infinite;
+}
+
+.kiq-live-status-processing {
+    display: inline-block;
+    padding: 6px 12px;
+    background: rgba(37, 99, 235, 0.1);
+    color: #2563eb;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    margin-top: 8px;
+    animation: pulse-subtle 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-subtle {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+/* Live Thread / Conversation UI */
+.kiq-live-thread {
+    background: var(--kiq-surface-subtle);
+    border-radius: 12px;
+    padding: 16px;
+    font-size: 13px;
+    line-height: 1.6;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.kiq-live-message {
+    margin-bottom: 12px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    background: var(--kiq-surface);
+    border: 1px solid var(--kiq-border);
+}
+
+.kiq-live-message.user {
+    background: var(--kiq-accent-soft);
+    border-color: var(--kiq-accent);
+    margin-left: 30px;
+}
+
+.kiq-live-message.coach {
+    background: var(--kiq-surface);
+    margin-right: 30px;
+}
+
+.kiq-live-message.system {
+    background: var(--kiq-warn-soft);
+    border-color: var(--kiq-warn);
+    font-size: 12px;
+    text-align: center;
+}
+
+.kiq-live-message-sender {
+    font-weight: 600;
+    font-size: 11px;
+    color: var(--kiq-muted);
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+/* Camera preview with quality indicators */
+.kiq-live-preview {
+    position: relative;
+    overflow: hidden;
+    border-radius: 12px;
+    background: var(--kiq-surface-subtle);
+}
+
+.kiq-live-quality-badge {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    padding: 6px 10px;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    z-index: 10;
+}
+
+.kiq-live-quality-badge.good {
+    background: rgba(16, 185, 129, 0.8);
+}
+
+.kiq-live-quality-badge.warn {
+    background: rgba(245, 158, 11, 0.8);
+}
+
+.kiq-live-quality-badge.bad {
+    background: rgba(220, 38, 38, 0.8);
+}

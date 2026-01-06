@@ -1183,12 +1183,100 @@ class KitchenIQDashboard {
             canvas.height = this.liveVideoEl.videoHeight;
             const ctx = canvas.getContext('2d');
             ctx.drawImage(this.liveVideoEl, 0, 0, canvas.width, canvas.height);
+            
+            // Perform quality assessment on captured frame
+            const quality = this.assessFrameQuality(canvas);
+            console.log('Frame quality assessment:', quality);
+            
+            // Show quality badge if available
+            if (quality.score < 0.6) {
+                console.warn('Low frame quality:', quality.issues.join(', '));
+                // Could prompt user but for now just log
+            }
+            
             this.liveLatestFrame = canvas.toDataURL('image/jpeg', 0.6);
             return this.liveLatestFrame;
         } catch (err) {
             console.error('Capture frame failed', err);
             return null;
         }
+    }
+
+    /**
+     * Assess captured frame quality: brightness, blur, motion blur, etc.
+     * Returns { score: 0-1, issues: [...], quality: 'good'|'warn'|'bad' }
+     */
+    assessFrameQuality(canvas) {
+        const ctx = canvas.getContext('2d');
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        
+        const issues = [];
+        let brightnesSum = 0;
+        
+        // Sample pixels (every 4th pixel for performance)
+        const sampleCount = data.length / 16; // RGBA * 4
+        for (let i = 0; i < data.length; i += 16) {
+            const r = data[i];
+            const g = data[i + 1];
+            const b = data[i + 2];
+            brightnesSum += (r + g + b) / 3;
+        }
+        
+        const avgBrightness = brightnesSum / sampleCount;
+        
+        // Check for too dark
+        if (avgBrightness < 50) {
+            issues.push('too_dark');
+        }
+        
+        // Check for too bright (blown out)
+        if (avgBrightness > 230) {
+            issues.push('too_bright');
+        }
+        
+        // Simple blur detection via edge detection (Sobel-like)
+        const edgeScore = this.estimateEdgeSharpness(canvas);
+        if (edgeScore < 0.3) {
+            issues.push('blurry');
+        }
+        
+        // Calculate quality score
+        let score = 1.0;
+        if (avgBrightness < 50) score -= 0.3;
+        if (avgBrightness > 230) score -= 0.2;
+        if (edgeScore < 0.3) score -= 0.2;
+        
+        score = Math.max(0, Math.min(1, score));
+        
+        const quality = score >= 0.7 ? 'good' : score >= 0.4 ? 'warn' : 'bad';
+        
+        return { score, issues, quality };
+    }
+
+    /**
+     * Estimate frame sharpness via edge detection
+     */
+    estimateEdgeSharpness(canvas) {
+        const ctx = canvas.getContext('2d');
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        
+        let edgeSum = 0;
+        let edgeCount = 0;
+        
+        // Sample edges (simple horizontal & vertical gradient check)
+        for (let i = 0; i < data.length - 4 - canvas.width * 4; i += 16) {
+            // Check horizontal gradient
+            const dx = Math.abs(data[i] - data[i + 4]);
+            // Check vertical gradient
+            const dy = Math.abs(data[i] - data[i + canvas.width * 4]);
+            
+            edgeSum += (dx + dy) / 510;
+            edgeCount++;
+        }
+        
+        return edgeCount > 0 ? edgeSum / edgeCount : 0;
     }
 
     appendLiveMessage(role, text) {
@@ -1199,8 +1287,21 @@ class KitchenIQDashboard {
             this.liveThreadEl.textContent = '';
         }
         const block = document.createElement('div');
-        block.className = 'kiq-live-msg';
-        block.innerHTML = `<strong>${role}:</strong> ${text}`;
+        block.className = 'kiq-live-message';
+        
+        // Add role-specific class for styling
+        if (role === 'You' || role === 'User') {
+            block.classList.add('user');
+        } else if (role === 'Coach') {
+            block.classList.add('coach');
+        } else if (role === 'System') {
+            block.classList.add('system');
+        }
+        
+        block.innerHTML = `
+            <div class="kiq-live-message-sender">${role}</div>
+            <div>${text}</div>
+        `;
         this.liveThreadEl.appendChild(block);
         this.liveThreadEl.scrollTop = this.liveThreadEl.scrollHeight;
     }
@@ -1358,6 +1459,97 @@ class KitchenIQDashboard {
             if (transcript) {
                 await this.sendLiveAssist(transcript);
             }
+        }
+    }
+
+    /**
+     * Stream voice input: sends transcript + frame to streaming /stream/voice endpoint
+     * which returns SSE events with interim intents and suggestions.
+     */
+    async streamVoiceInput(transcript, frameDataUrl = null) {
+        const frame = frameDataUrl || this.liveLatestFrame || '';
+        
+        console.log('streamVoiceInput: transcript length:', transcript?.length);
+        
+        this.appendLiveMessage('You', transcript || '(frame sent)');
+        this.setLiveStatus('Processing voice...');
+        
+        try {
+            const payload = { 
+                transcript: transcript || '', 
+                audio_chunk: frame // For Phase 1, frame can serve as interim; true audio chunks later
+            };
+            
+            const res = await fetch(`${this.apiRoot}kitcheniq/v1/stream/voice`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-WP-Nonce': this.nonce,
+                },
+            });
+            
+            if (!res.ok) {
+                const msg = `Voice stream error: ${res.status}`;
+                this.setLiveStatus(msg);
+                this.appendLiveMessage('Coach', msg);
+                return;
+            }
+            
+            // Handle Server-Sent Events
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let itemsDetected = [];
+            let actions = [];
+            
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop(); // Keep incomplete line in buffer
+                
+                for (const line of lines) {
+                    if (line.startsWith('event: ')) {
+                        // No-op, already handled below
+                    } else if (line.startsWith('data: ')) {
+                        const jsonStr = line.substring(6);
+                        try {
+                            const event = JSON.parse(jsonStr);
+                            
+                            if (event.event === 'intent') {
+                                itemsDetected = event.items_detected || [];
+                                actions = event.actions || [];
+                                if (itemsDetected.length > 0) {
+                                    this.setLiveStatus(`Detected: ${itemsDetected.join(', ')}`);
+                                }
+                            } else if (event.event === 'suggestion') {
+                                this.appendLiveMessage('Coach', event.message);
+                            } else if (event.event === 'done') {
+                                this.setLiveStatus('Voice processed');
+                            }
+                        } catch (parseErr) {
+                            console.warn('Failed to parse SSE event:', jsonStr, parseErr);
+                        }
+                    }
+                }
+            }
+            
+            // Summarize detected items
+            if (itemsDetected.length > 0) {
+                const summary = `Coach heard: ${itemsDetected.join(', ')}`;
+                this.appendLiveMessage('Coach', summary);
+            } else {
+                this.appendLiveMessage('Coach', 'Ready for more input');
+            }
+            
+            this.setLiveStatus('Ready to talk');
+            
+        } catch (err) {
+            console.error('Stream voice error:', err);
+            this.setLiveStatus('Error streaming voice');
+            this.appendLiveMessage('Coach', 'Stream error - try again');
         }
     }
 
