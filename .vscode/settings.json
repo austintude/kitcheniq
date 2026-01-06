@@ -1,0 +1,6 @@
+{
+  "github.copilot.chat.welcomeMessage": "Read @.copilot-instructions.md before starting",
+  "files.associations": {
+    ".copilot-instructions.md": "markdown"
+  }
+}
