@@ -1075,8 +1075,17 @@ class KIQ_REST {
      */
     private static function normalize_inventory_name( $name ) {
         $name = strtolower( trim( (string) $name ) );
+
+        // Strip common packaging/size noise.
+        // Examples: "16oz", "12 oz", "2lb", "500ml", "(fresh)", "-" etc.
+        $name = preg_replace( '/\([^)]*\)/', ' ', $name );
+        $name = preg_replace( '/\b\d+(?:\.\d+)?\s*(?:oz|lb|lbs|g|kg|ml|l|ct|count|pcs|pc)\b/i', ' ', $name );
+
+        // Normalize punctuation to spaces, then collapse whitespace.
+        $name = preg_replace( '/[^a-z0-9]+/i', ' ', $name );
         $name = preg_replace( '/\s+/', ' ', $name );
-        return $name;
+
+        return trim( $name );
     }
 
     /**
