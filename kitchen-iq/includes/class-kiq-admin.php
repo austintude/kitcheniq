@@ -620,6 +620,14 @@ class KIQ_Admin {
                         <td><?php echo esc_html( KIQ_VERSION ); ?></td>
                     </tr>
                     <tr>
+                        <td><strong>Plugin Basename:</strong></td>
+                        <td><code><?php echo esc_html( plugin_basename( KIQ_PLUGIN_DIR . 'kitchen-iq.php' ) ); ?></code></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Plugin Dir:</strong></td>
+                        <td><code><?php echo esc_html( KIQ_PLUGIN_DIR ); ?></code></td>
+                    </tr>
+                    <tr>
                         <td><strong>API Key Configured:</strong></td>
                         <td><?php echo KIQ_API_KEY ? '✓ Yes' : '✗ No (Set KIQ_API_KEY env var)'; ?></td>
                     </tr>
@@ -640,6 +648,40 @@ class KIQ_Admin {
                             foreach ( $tables as $table ) {
                                 $exists = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) ) === $table;
                                 echo ( $exists ? '✓' : '✗' ) . ' ' . esc_html( $table ) . '<br />';
+                            }
+                            ?>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h2><?php esc_html_e( 'Install Diagnostics', 'kitchen-iq' ); ?></h2>
+            <table class="widefat">
+                <tbody>
+                    <tr>
+                        <td style="width:260px;"><strong>Expected plugin file:</strong></td>
+                        <td><code>wp-content/plugins/kitchen-iq/kitchen-iq.php</code></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Detected KitchenIQ folders:</strong></td>
+                        <td>
+                            <?php
+                            $folders = array();
+                            if ( defined( 'WP_PLUGIN_DIR' ) ) {
+                                $paths = glob( trailingslashit( WP_PLUGIN_DIR ) . 'kitchen-iq*', GLOB_ONLYDIR );
+                                $paths = is_array( $paths ) ? $paths : array();
+                                foreach ( $paths as $p ) {
+                                    $folders[] = basename( $p );
+                                }
+                            }
+
+                            if ( empty( $folders ) ) {
+                                echo '<em>None found</em>';
+                            } else {
+                                echo '<code>' . esc_html( implode( ', ', $folders ) ) . '</code>';
+                                if ( count( $folders ) > 1 ) {
+                                    echo '<br/><span style="color:#b32d2e;"><strong>Warning:</strong> multiple folders can cause activation paths like <code>kitchen-iq/kitchen-iq/kitchen-iq.php</code> and break updates. Delete the extra folder(s) (usually <code>kitchen-iq-1</code>).</span>';
+                                }
                             }
                             ?>
                         </td>

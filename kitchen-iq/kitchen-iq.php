@@ -3,7 +3,7 @@
  * Plugin Name: KitchenIQ
  * Plugin URI: https://kitcheniq.ai
  * Description: AI-powered kitchen intelligence system. Scan your pantry, get personalized meal plans, and reduce food waste.
- * Version: 1.0.9.4
+ * Version: 1.0.9.5
  * Author: KitchenIQ
  * Author URI: https://kitcheniq.ai
  * License: GPL-2.0+
@@ -23,7 +23,7 @@ if ( ! defined( 'KIQ_PLUGIN_URL' ) ) {
     define( 'KIQ_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 }
 if ( ! defined( 'KIQ_VERSION' ) ) {
-    define( 'KIQ_VERSION', '1.0.9.4' );
+    define( 'KIQ_VERSION', '1.0.9.5' );
 }
 
 // API Key configuration - check environment first, then WordPress options
@@ -72,6 +72,11 @@ register_deactivation_hook( __FILE__, array( 'KIQ_Activator', 'deactivate' ) );
 add_action( 'plugins_loaded', array( 'KIQ_Main', 'load_textdomain' ) );
 add_action( 'init', array( 'KIQ_Main', 'init' ) );
 
+// Admin-only sanity checks to catch bad installs (double-nesting, duplicate folders).
+if ( is_admin() ) {
+    add_action( 'admin_notices', array( 'KIQ_Main', 'admin_install_sanity_notice' ) );
+}
+
 /**
  * Main plugin class
  */
@@ -79,6 +84,49 @@ class KIQ_Main {
 
     private static $pwa_enabled_on_request = false;
     private static $pwa_start_path         = '/';
+
+    /**
+     * Warn admins if KitchenIQ is installed in an unexpected location.
+     * This prevents the "Plugin file does not exist" failure caused by nested folders.
+     */
+    public static function admin_install_sanity_notice() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            return;
+        }
+
+        // Expected plugin basename.
+        $expected = 'kitchen-iq/kitchen-iq.php';
+        $actual   = plugin_basename( __FILE__ );
+
+        $problems = array();
+
+        if ( $actual !== $expected ) {
+            $problems[] = sprintf(
+                'KitchenIQ is running from an unexpected path: <code>%s</code> (expected <code>%s</code>).',
+                esc_html( $actual ),
+                esc_html( $expected )
+            );
+        }
+
+        // Detect duplicate install folders.
+        if ( defined( 'WP_PLUGIN_DIR' ) ) {
+            $paths = glob( trailingslashit( WP_PLUGIN_DIR ) . 'kitchen-iq*', GLOB_ONLYDIR );
+            $paths = is_array( $paths ) ? $paths : array();
+            if ( count( $paths ) > 1 ) {
+                $problems[] = 'Multiple KitchenIQ plugin folders detected: <code>' . esc_html( implode( ', ', array_map( 'basename', $paths ) ) ) . '</code>. Delete the extra one(s) to avoid activation bugs.';
+            }
+        }
+
+        if ( empty( $problems ) ) {
+            return;
+        }
+
+        echo '<div class="notice notice-warning"><p><strong>KitchenIQ install warning:</strong></p><ul style="margin-left:18px; list-style:disc;">';
+        foreach ( $problems as $p ) {
+            echo '<li>' . $p . '</li>';
+        }
+        echo '</ul><p>Go to <strong>KitchenIQ → Debug</strong> for more details.</p></div>';
+    }
 
     /**
      * Load plugin text domain for translations.

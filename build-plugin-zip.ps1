@@ -56,11 +56,18 @@ try {
       throw "Zip contains backslash (\\) entry names - NOT SAFE for WP installs on Linux hosts."
     }
 
-    if (-not ($entries -contains "$PluginDir/$PluginDir.php") -and -not ($entries -contains "$PluginDir/kitchen-iq.php")) {
-      Write-Warning "Could not find expected main plugin file inside zip. Check plugin root file name."
+    # Ensure main plugin file is at the expected location and not double-nested.
+    $expectedMain = "$PluginDir/kitchen-iq.php"
+    if (-not ($entries -contains $expectedMain)) {
+      throw "Zip is missing expected main plugin file: $expectedMain"
     }
 
-    Write-Host "OK: entries are POSIX-style (/)"
+    $doubleNested = "$PluginDir/$PluginDir/kitchen-iq.php"
+    if ($entries -contains $doubleNested) {
+      throw "Zip contains double-nested plugin file (will break activation links): $doubleNested"
+    }
+
+    Write-Host "OK: entries are POSIX-style (/) and structure looks correct"
   }
 }
 finally {
