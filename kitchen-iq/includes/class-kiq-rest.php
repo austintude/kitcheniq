@@ -96,7 +96,7 @@ class KIQ_REST {
                 'callback'            => array( __CLASS__, 'handle_inventory_confirm' ),
                 'permission_callback' => array( __CLASS__, 'check_auth' ),
                 'args'                => array(
-                    'item_id'              => array( 'type' => 'integer', 'required' => true ),
+                    'item_id'              => array( 'type' => 'string', 'required' => true ),
                     'status'               => array( 'type' => 'string', 'required' => true ),
                     'days_until_expiry'    => array( 'type' => 'integer' ),
                 ),
@@ -170,14 +170,14 @@ class KIQ_REST {
             )
         );
 
-        // Diagnostic endpoint (public for anyone to see)
+        // Diagnostic endpoint (admin only)
         register_rest_route(
             'kitcheniq/v1',
             '/diagnostic',
             array(
                 'methods'             => 'GET',
                 'callback'            => array( __CLASS__, 'handle_diagnostic' ),
-                'permission_callback' => '__return_true',  // Allow public access to diagnostics
+                'permission_callback' => array( __CLASS__, 'check_admin' ),
             )
         );
 
@@ -289,20 +289,8 @@ class KIQ_REST {
      * Check if request is from an admin user (or logged-in user for diagnostics)
      */
     public static function check_admin( $request ) {
-        // Must be logged in
-        if ( ! is_user_logged_in() ) {
-            return false;
-        }
-        
-        // Admin users can always access
-        if ( current_user_can( 'manage_options' ) ) {
-            return true;
-        }
-        
-        // For diagnostics (debugging), also allow any logged-in user
-        // This helps users self-diagnose without needing admin access
-        // In production, you can restrict to manage_options only by removing the next line
-        return true;
+        // Must be logged in AND be an admin.
+        return is_user_logged_in() && current_user_can( 'manage_options' );
     }
 
     /**
@@ -673,16 +661,22 @@ class KIQ_REST {
         $user_id = get_current_user_id();
         $params  = $request->get_json_params();
 
-        $item_id            = intval( $params['item_id'] );
-        $status             = sanitize_text_field( $params['status'] );
+        $item_id_raw        = $params['item_id'] ?? '';
+        $item_id            = is_scalar( $item_id_raw ) ? sanitize_text_field( (string) $item_id_raw ) : '';
+        $status             = sanitize_text_field( $params['status'] ?? '' );
         $days_until_expiry  = intval( $params['days_until_expiry'] ?? 0 );
+
+        if ( $item_id === '' ) {
+            return new WP_REST_Response( array( 'error' => 'Missing item_id' ), 400 );
+        }
 
         $inventory = KIQ_Data::get_inventory( $user_id );
 
         // Find and update item
         foreach ( $inventory as &$item ) {
-            if ( $item['id'] === $item_id ) {
-                $item['status']           = $status;
+            $cur_id = isset( $item['id'] ) ? (string) $item['id'] : '';
+            if ( $cur_id === $item_id ) {
+                $item['status']            = $status;
                 $item['last_confirmed_at'] = current_time( 'mysql' );
                 if ( $days_until_expiry > 0 ) {
                     $item['expiry_estimate'] = date_i18n( 'Y-m-d', time() + ( $days_until_expiry * DAY_IN_SECONDS ) );

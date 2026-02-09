@@ -172,7 +172,7 @@ class KIQ_AI {
         }
 
         if ( ! KIQ_Features::can_scan_pantry( $user_id ) ) {
-            return new WP_Error( 'rate_limit', 'Vision scan limit reached for this month' );
+            return new WP_Error( 'rate_limit', 'Vision scan limit reached for this week' );
         }
 
         $vision_prompt = get_option( 'kiq_ai_vision_prompt', self::get_default_vision_prompt() );

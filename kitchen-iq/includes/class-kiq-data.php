@@ -272,41 +272,41 @@ class KIQ_Data {
      * Increment vision scan count for user's month
      */
     public static function increment_vision_scans( $user_id ) {
+        // Vision scans are tracked per-week (same as meal requests) to match tier limits.
         global $wpdb;
         $table_name = $wpdb->prefix . 'kiq_usage';
 
-        $month_start = date( 'Y-m-01' );
+        $week_start = date( 'Y-m-d', strtotime( 'monday this week' ) );
 
-        // Get usage for this month
+        // Ensure a record exists for this week.
         $usage = $wpdb->get_row(
             $wpdb->prepare(
-                "SELECT * FROM {$table_name} WHERE user_id = %d AND week_start_date >= %s ORDER BY week_start_date DESC LIMIT 1",
+                "SELECT * FROM {$table_name} WHERE user_id = %d AND week_start_date = %s",
                 $user_id,
-                $month_start
+                $week_start
             )
         );
 
         if ( ! $usage ) {
-            // Create new record for this month
             $wpdb->insert(
                 $table_name,
                 array(
-                    'user_id'              => $user_id,
-                    'week_start_date'      => date( 'Y-m-d' ),
+                    'user_id'               => $user_id,
+                    'week_start_date'       => $week_start,
                     'meals_requested_count' => 0,
-                    'vision_scans_count'   => 1,
+                    'vision_scans_count'    => 0,
                 ),
                 array( '%d', '%s', '%d', '%d' )
             );
-        } else {
-            $wpdb->update(
-                $table_name,
-                array( 'vision_scans_count' => $usage->vision_scans_count + 1 ),
-                array( 'id' => $usage->id ),
-                array( '%d' ),
-                array( '%d' )
-            );
         }
+
+        $wpdb->query(
+            $wpdb->prepare(
+                "UPDATE {$table_name} SET vision_scans_count = vision_scans_count + 1 WHERE user_id = %d AND week_start_date = %s",
+                $user_id,
+                $week_start
+            )
+        );
     }
 
     /**

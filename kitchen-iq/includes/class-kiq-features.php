@@ -63,7 +63,7 @@ class KIQ_Features {
 
         $used_scans = 0;
         if ( is_array( $used ) ) {
-            $used_scans = intval( $used['vision_scans'] ?? $used['vision_scans_count'] ?? $used['vision_scans_count'] ?? 0 );
+            $used_scans = intval( $used['vision_scans'] ?? $used['vision_scans_count'] ?? 0 );
         } elseif ( is_object( $used ) ) {
             $used_scans = intval( $used->vision_scans_count ?? $used->vision_scans ?? 0 );
         }
