@@ -611,6 +611,7 @@ class KIQ_Admin {
         ?>
         <div class="wrap">
             <h1><?php esc_html_e( 'KitchenIQ Debug', 'kitchen-iq' ); ?></h1>
+            <p class="description">Build marker: 1.0.9.7</p>
 
             <h2><?php esc_html_e( 'System Information', 'kitchen-iq' ); ?></h2>
             <table class="widefat">
