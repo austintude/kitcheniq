@@ -965,9 +965,13 @@ class KIQ_REST {
             );
         }
 
-        // Merge with existing inventory
+        // Merge with existing inventory (deduplicate by normalized name)
         $existing_inventory = KIQ_Data::get_inventory( $user_id );
         $new_items          = $all_new_items;
+
+        $dedup = self::deduplicate_inventory_items( $new_items, $existing_inventory );
+        $new_items = $dedup['items'];
+        $skipped   = $dedup['skipped'];
 
         foreach ( $new_items as &$item ) {
             $item['id']       = wp_rand( 100000, 999999 );
@@ -979,13 +983,100 @@ class KIQ_REST {
         KIQ_Data::save_inventory( $user_id, $merged_inventory );
 
         return new WP_REST_Response( array(
-            'success'      => true,
-            'items_added'  => count( $new_items ),
-            'new_items'    => $new_items,
-            'inventory'    => $merged_inventory,
-            'scan_results' => $scan_results,
-            'remaining'    => KIQ_Features::get_remaining_usage( $user_id ),
+            'success'                   => true,
+            'items_added'               => count( $new_items ),
+            'items_skipped_duplicates'  => count( $skipped ),
+            'skipped_duplicates'        => $skipped,
+            'new_items'                 => $new_items,
+            'inventory'                 => $merged_inventory,
+            'scan_results'              => $scan_results,
+            'remaining'                 => KIQ_Features::get_remaining_usage( $user_id ),
         ), 200 );
+    }
+
+    /**
+     * Deduplicate new inventory items against existing inventory.
+     *
+     * Current strategy:
+     * - normalize names (lowercase, collapse whitespace)
+     * - exact match on normalized name OR fuzzy match (levenshtein similarity)
+     *
+     * Returns:
+     *   [ 'items' => <filtered new items>, 'skipped' => <skipped items (lightweight)> ]
+     */
+    private static function deduplicate_inventory_items( $new_items, $existing_inventory ) {
+        $new_items          = is_array( $new_items ) ? $new_items : array();
+        $existing_inventory = is_array( $existing_inventory ) ? $existing_inventory : array();
+
+        $existing_names = array();
+        foreach ( $existing_inventory as $ex ) {
+            $name = is_array( $ex ) ? (string) ( $ex['name'] ?? '' ) : '';
+            $norm = self::normalize_inventory_name( $name );
+            if ( $norm !== '' ) {
+                $existing_names[] = $norm;
+            }
+        }
+
+        $filtered = array();
+        $skipped  = array();
+
+        foreach ( $new_items as $item ) {
+            $name = is_array( $item ) ? (string) ( $item['name'] ?? '' ) : '';
+            $norm = self::normalize_inventory_name( $name );
+
+            if ( $norm === '' ) {
+                // If name is missing, keep it (let UI show + user can fix).
+                $filtered[] = $item;
+                continue;
+            }
+
+            $is_duplicate = in_array( $norm, $existing_names, true );
+
+            if ( ! $is_duplicate && function_exists( 'levenshtein' ) && ! empty( $existing_names ) ) {
+                // Fuzzy check for small typos.
+                foreach ( $existing_names as $ex_norm ) {
+                    $max_len = max( strlen( $norm ), strlen( $ex_norm ) );
+                    if ( $max_len === 0 ) {
+                        continue;
+                    }
+
+                    // similarity score 0..1 (1 = identical)
+                    $dist = levenshtein( $norm, $ex_norm );
+                    $sim  = 1 - ( $dist / $max_len );
+
+                    if ( $sim >= 0.85 ) {
+                        $is_duplicate = true;
+                        break;
+                    }
+                }
+            }
+
+            if ( $is_duplicate ) {
+                $skipped[] = array(
+                    'name'     => $name,
+                    'category' => is_array( $item ) ? ( $item['category'] ?? 'general' ) : 'general',
+                );
+                continue;
+            }
+
+            // Mark this new item as now-existing to prevent duplicates *within the same scan*.
+            $existing_names[] = $norm;
+            $filtered[] = $item;
+        }
+
+        return array(
+            'items'   => $filtered,
+            'skipped' => $skipped,
+        );
+    }
+
+    /**
+     * Normalize an inventory item name for deduplication.
+     */
+    private static function normalize_inventory_name( $name ) {
+        $name = strtolower( trim( (string) $name ) );
+        $name = preg_replace( '/\s+/', ' ', $name );
+        return $name;
     }
 
     /**
