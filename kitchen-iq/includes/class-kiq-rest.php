@@ -9,6 +9,11 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class KIQ_REST {
 
+    // Hook WP-Cron handler for video scan sessions.
+    public static function register_cron_hooks() {
+        add_action( 'kiq_process_video_scan', array( __CLASS__, 'process_video_scan_event' ), 10, 1 );
+    }
+
     public static function init() {
         add_action( 'rest_api_init', array( __CLASS__, 'register_routes' ) );
     }
@@ -129,6 +134,37 @@ class KIQ_REST {
             array(
                 'methods'             => 'POST',
                 'callback'            => array( __CLASS__, 'handle_inventory_scan_video' ),
+                'permission_callback' => array( __CLASS__, 'check_auth' ),
+            )
+        );
+
+        // Video scan session endpoints (for back-and-forth UX).
+        register_rest_route(
+            'kitcheniq/v1',
+            '/scan/video/start',
+            array(
+                'methods'             => 'POST',
+                'callback'            => array( __CLASS__, 'handle_scan_video_start' ),
+                'permission_callback' => array( __CLASS__, 'check_auth' ),
+            )
+        );
+
+        register_rest_route(
+            'kitcheniq/v1',
+            '/scan/video/status',
+            array(
+                'methods'             => 'GET',
+                'callback'            => array( __CLASS__, 'handle_scan_video_status' ),
+                'permission_callback' => array( __CLASS__, 'check_auth' ),
+            )
+        );
+
+        register_rest_route(
+            'kitcheniq/v1',
+            '/scan/video/answer',
+            array(
+                'methods'             => 'POST',
+                'callback'            => array( __CLASS__, 'handle_scan_video_answer' ),
                 'permission_callback' => array( __CLASS__, 'check_auth' ),
             )
         );
@@ -831,6 +867,8 @@ class KIQ_REST {
      * Expects a file upload field named "video".
      */
     public static function handle_inventory_scan_video( $request ) {
+        // Legacy single-call endpoint. Prefer /scan/video/start + status + answer for better UX.
+
         $user_id = get_current_user_id();
 
         if ( function_exists( 'set_time_limit' ) ) {
@@ -900,6 +938,310 @@ class KIQ_REST {
             error_log( sprintf( 'KIQ inventory-scan-video: complete in %.2fs', microtime( true ) - $t0 ) );
         }
         return $resp;
+    }
+
+    /**
+     * Video scan session: start.
+     * Accepts a multipart upload field named "video".
+     */
+    public static function handle_scan_video_start( $request ) {
+        $user_id = get_current_user_id();
+
+        if ( ! self::is_video_scanning_enabled() ) {
+            $has_ffmpeg = self::has_ffmpeg();
+            return new WP_REST_Response( array(
+                'error'      => 'Video scanning is not available. ' . ( $has_ffmpeg ? 'Please enable it in settings.' : 'Requires ffmpeg to be installed on the server.' ),
+                'ffmpeg'     => $has_ffmpeg,
+                'suggestion' => 'Please use photo scanning instead.',
+            ), 400 );
+        }
+
+        $files = $request->get_file_params();
+        if ( empty( $files['video'] ) ) {
+            return new WP_REST_Response( array( 'error' => 'No video file provided' ), 400 );
+        }
+
+        $video_file = $files['video'];
+        if ( ! isset( $video_file['error'] ) || $video_file['error'] !== UPLOAD_ERR_OK ) {
+            return new WP_REST_Response( array( 'error' => 'File upload error: ' . ( $video_file['error'] ?? 'unknown' ) ), 400 );
+        }
+
+        $tmp_name = $video_file['tmp_name'] ?? '';
+        if ( empty( $tmp_name ) || ! file_exists( $tmp_name ) ) {
+            return new WP_REST_Response( array( 'error' => 'Uploaded video file missing on server' ), 400 );
+        }
+
+        $audio_transcription = $request->get_param( 'audio_transcription' );
+        $audio_transcription = is_string( $audio_transcription ) ? sanitize_textarea_field( $audio_transcription ) : '';
+
+        // Persist video to uploads so WP-Cron can read it.
+        $upload_dir = wp_upload_dir();
+        $base_dir   = trailingslashit( $upload_dir['basedir'] ) . 'kitcheniq-scans';
+        if ( ! file_exists( $base_dir ) ) {
+            wp_mkdir_p( $base_dir );
+        }
+
+        $scan_id = wp_generate_uuid4();
+        $dest    = trailingslashit( $base_dir ) . 'scan-' . $scan_id . '.mp4';
+
+        // Move/copy the temp upload.
+        if ( ! @move_uploaded_file( $tmp_name, $dest ) ) {
+            // Fallback for non-HTTP upload contexts.
+            if ( ! @copy( $tmp_name, $dest ) ) {
+                return new WP_REST_Response( array( 'error' => 'Unable to persist uploaded video for processing' ), 500 );
+            }
+        }
+
+        $state = array(
+            'scan_id'            => $scan_id,
+            'user_id'            => $user_id,
+            'status'             => 'queued',
+            'progress'           => 0,
+            'message'            => 'Queued video scan…',
+            'video_path'         => $dest,
+            'audio_transcription'=> $audio_transcription,
+            'created_at'         => time(),
+            'question'           => null,
+            'pending_items'      => null,
+            'scan_results'       => null,
+        );
+
+        set_transient( self::scan_transient_key( $scan_id ), $state, HOUR_IN_SECONDS );
+
+        // Kick off processing ASAP.
+        if ( ! wp_next_scheduled( 'kiq_process_video_scan', array( $scan_id ) ) ) {
+            wp_schedule_single_event( time() + 1, 'kiq_process_video_scan', array( $scan_id ) );
+        }
+
+        return new WP_REST_Response( array(
+            'success' => true,
+            'scan_id' => $scan_id,
+        ), 200 );
+    }
+
+    /**
+     * Video scan session: status.
+     */
+    public static function handle_scan_video_status( $request ) {
+        $scan_id = sanitize_text_field( $request->get_param( 'scan_id' ) );
+        if ( empty( $scan_id ) ) {
+            return new WP_REST_Response( array( 'error' => 'Missing scan_id' ), 400 );
+        }
+
+        $state = get_transient( self::scan_transient_key( $scan_id ) );
+        if ( empty( $state ) || ! is_array( $state ) ) {
+            return new WP_REST_Response( array( 'error' => 'Unknown or expired scan_id' ), 404 );
+        }
+
+        // Ensure scan belongs to current user.
+        $user_id = get_current_user_id();
+        if ( intval( $state['user_id'] ?? 0 ) !== intval( $user_id ) ) {
+            return new WP_REST_Response( array( 'error' => 'Unauthorized' ), 403 );
+        }
+
+        // If queued but cron didn't run, nudge it.
+        if ( ( $state['status'] ?? '' ) === 'queued' && ! wp_next_scheduled( 'kiq_process_video_scan', array( $scan_id ) ) ) {
+            wp_schedule_single_event( time() + 1, 'kiq_process_video_scan', array( $scan_id ) );
+        }
+
+        return new WP_REST_Response( array(
+            'success'  => true,
+            'scan_id'  => $scan_id,
+            'status'   => $state['status'] ?? 'unknown',
+            'progress' => intval( $state['progress'] ?? 0 ),
+            'message'  => $state['message'] ?? '',
+            'question' => $state['question'] ?? null,
+            // When done, include results.
+            'result'   => $state['result'] ?? null,
+        ), 200 );
+    }
+
+    /**
+     * Video scan session: answer a clarification question.
+     */
+    public static function handle_scan_video_answer( $request ) {
+        $user_id = get_current_user_id();
+
+        $params = $request->get_json_params();
+        $scan_id = sanitize_text_field( $params['scan_id'] ?? '' );
+        $answer  = sanitize_textarea_field( $params['answer'] ?? '' );
+
+        if ( empty( $scan_id ) ) {
+            return new WP_REST_Response( array( 'error' => 'Missing scan_id' ), 400 );
+        }
+
+        $state = get_transient( self::scan_transient_key( $scan_id ) );
+        if ( empty( $state ) || ! is_array( $state ) ) {
+            return new WP_REST_Response( array( 'error' => 'Unknown or expired scan_id' ), 404 );
+        }
+
+        if ( intval( $state['user_id'] ?? 0 ) !== intval( $user_id ) ) {
+            return new WP_REST_Response( array( 'error' => 'Unauthorized' ), 403 );
+        }
+
+        if ( ( $state['status'] ?? '' ) !== 'clarifying' ) {
+            return new WP_REST_Response( array( 'error' => 'Scan is not awaiting clarification' ), 400 );
+        }
+
+        $state['answer']  = $answer;
+        $state['status']  = 'queued';
+        $state['message'] = 'Got it — continuing scan…';
+        $state['question']= null;
+        $state['progress']= max( intval( $state['progress'] ?? 0 ), 50 );
+
+        set_transient( self::scan_transient_key( $scan_id ), $state, HOUR_IN_SECONDS );
+
+        if ( ! wp_next_scheduled( 'kiq_process_video_scan', array( $scan_id ) ) ) {
+            wp_schedule_single_event( time() + 1, 'kiq_process_video_scan', array( $scan_id ) );
+        }
+
+        return new WP_REST_Response( array( 'success' => true ), 200 );
+    }
+
+    /**
+     * Internal: process a queued scan session (WP-Cron).
+     */
+    public static function process_video_scan_event( $scan_id ) {
+        $state = get_transient( self::scan_transient_key( $scan_id ) );
+        if ( empty( $state ) || ! is_array( $state ) ) {
+            return;
+        }
+
+        // If awaiting user, do nothing.
+        if ( ( $state['status'] ?? '' ) === 'clarifying' ) {
+            return;
+        }
+
+        $user_id    = intval( $state['user_id'] ?? 0 );
+        $video_path = (string) ( $state['video_path'] ?? '' );
+
+        if ( ! $user_id || empty( $video_path ) || ! file_exists( $video_path ) ) {
+            $state['status']  = 'error';
+            $state['message'] = 'Video file missing while processing.';
+            set_transient( self::scan_transient_key( $scan_id ), $state, HOUR_IN_SECONDS );
+            return;
+        }
+
+        $state['status']   = 'processing';
+        $state['progress'] = 10;
+        $state['message']  = 'Extracting frames from your video…';
+        set_transient( self::scan_transient_key( $scan_id ), $state, HOUR_IN_SECONDS );
+
+        $max_frames_per_video = 3;
+        $frames = self::extract_frames_from_video( $video_path, $max_frames_per_video );
+        if ( is_wp_error( $frames ) ) {
+            $state['status']  = 'error';
+            $state['message'] = $frames->get_error_message();
+            set_transient( self::scan_transient_key( $scan_id ), $state, HOUR_IN_SECONDS );
+            return;
+        }
+
+        if ( empty( $frames ) ) {
+            $state['status']  = 'error';
+            $state['message'] = 'Unable to extract frames from video.';
+            set_transient( self::scan_transient_key( $scan_id ), $state, HOUR_IN_SECONDS );
+            return;
+        }
+
+        $state['progress'] = 35;
+        $state['message']  = 'Analyzing frames…';
+        set_transient( self::scan_transient_key( $scan_id ), $state, HOUR_IN_SECONDS );
+
+        // Process frames (reuse existing image pipeline for now).
+        $audio_transcription = (string) ( $state['audio_transcription'] ?? '' );
+        $resp = self::process_vision_scan_from_raw_images( $user_id, $frames, $audio_transcription );
+
+        // process_vision_scan_from_raw_images returns a WP_REST_Response.
+        $data = method_exists( $resp, 'get_data' ) ? $resp->get_data() : null;
+        $code = method_exists( $resp, 'get_status' ) ? $resp->get_status() : 500;
+
+        if ( $code >= 400 || empty( $data['success'] ) ) {
+            $state['status']  = 'error';
+            $state['message'] = (string) ( $data['error'] ?? $data['message'] ?? 'Video scan failed.' );
+            set_transient( self::scan_transient_key( $scan_id ), $state, HOUR_IN_SECONDS );
+            return;
+        }
+
+        // Heuristic: if there are low-confidence items, ask the user.
+        $new_items = $data['new_items'] ?? array();
+        $uncertain = array();
+        foreach ( $new_items as $it ) {
+            $conf = floatval( is_array( $it ) ? ( $it['confidence'] ?? 1.0 ) : 1.0 );
+            $name = is_array( $it ) ? (string) ( $it['name'] ?? '' ) : '';
+            if ( $name === '' || $conf < 0.6 ) {
+                $uncertain[] = $name !== '' ? $name : '(unknown item)';
+            }
+        }
+        $uncertain = array_values( array_unique( array_filter( $uncertain ) ) );
+
+        if ( ! empty( $uncertain ) && empty( $state['answer'] ) ) {
+            $state['status']        = 'clarifying';
+            $state['progress']      = 60;
+            $state['pending_items'] = $new_items;
+            $state['scan_results']  = $data['scan_results'] ?? array();
+            $state['message']       = 'I found some items, but I want to confirm a couple before saving.';
+            $state['question']      = 'I am not confident about: ' . implode( ', ', array_slice( $uncertain, 0, 3 ) ) . '. Reply with corrections (comma-separated) or reply "ok" to keep as-is.';
+            set_transient( self::scan_transient_key( $scan_id ), $state, HOUR_IN_SECONDS );
+            return;
+        }
+
+        // If user answered, best-effort apply corrections to pending_items, then save.
+        if ( ! empty( $state['answer'] ) && ! empty( $state['pending_items'] ) ) {
+            $answer = strtolower( trim( (string) $state['answer'] ) );
+            $items  = is_array( $state['pending_items'] ) ? $state['pending_items'] : $new_items;
+
+            if ( $answer !== 'ok' && $answer !== 'okay' ) {
+                $parts = array_values( array_filter( array_map( 'trim', explode( ',', (string) $state['answer'] ) ) ) );
+                // Replace names of the first N low-confidence items with provided corrections.
+                $pi = 0;
+                for ( $i = 0; $i < count( $items ) && $pi < count( $parts ); $i++ ) {
+                    $conf = floatval( $items[$i]['confidence'] ?? 1.0 );
+                    $name = (string) ( $items[$i]['name'] ?? '' );
+                    if ( $name === '' || $conf < 0.6 ) {
+                        $items[$i]['name'] = sanitize_text_field( $parts[$pi] );
+                        $items[$i]['confidence'] = max( $conf, 0.75 );
+                        $pi++;
+                    }
+                }
+            }
+
+            // Re-run dedup + save.
+            $existing_inventory = KIQ_Data::get_inventory( $user_id );
+            $dedup = self::deduplicate_inventory_items( $items, $existing_inventory );
+            $items = $dedup['items'];
+
+            foreach ( $items as &$item ) {
+                $item['id']       = wp_rand( 100000, 999999 );
+                $item['added_at'] = current_time( 'mysql' );
+                $item['category'] = $item['category'] ?? 'general';
+            }
+
+            $merged_inventory = array_merge( $existing_inventory, $items );
+            KIQ_Data::save_inventory( $user_id, $merged_inventory );
+
+            $data = array(
+                'success'     => true,
+                'items_added' => count( $items ),
+                'new_items'   => $items,
+                'inventory'   => $merged_inventory,
+                'scan_results'=> $state['scan_results'] ?? array(),
+                'remaining'   => KIQ_Features::get_remaining_usage( $user_id ),
+            );
+        }
+
+        $state['status']   = 'done';
+        $state['progress'] = 100;
+        $state['message']  = 'Done.';
+        $state['result']   = $data;
+
+        // Cleanup file.
+        @unlink( $video_path );
+
+        set_transient( self::scan_transient_key( $scan_id ), $state, HOUR_IN_SECONDS );
+    }
+
+    private static function scan_transient_key( $scan_id ) {
+        return 'kiq_scan_' . preg_replace( '/[^a-zA-Z0-9\-]/', '', (string) $scan_id );
     }
 
     /**

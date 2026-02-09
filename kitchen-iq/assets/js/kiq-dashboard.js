@@ -1964,14 +1964,14 @@ class KitchenIQDashboard {
                 console.warn('Audio transcription failed, continuing with video frames only:', transcribeError);
             }
 
-            // Now scan the video frames via multipart (preferred; avoids huge base64 JSON payloads)
+            // Start video scan session (enables progress + clarification interrupts)
             const scanForm = new FormData();
             scanForm.append('video', this.pendingVideo);
             if (transcription) {
                 scanForm.append('audio_transcription', transcription);
             }
 
-            const response = await fetch(`${this.apiRoot}kitcheniq/v1/inventory-scan-video`, {
+            const startResp = await fetch(`${this.apiRoot}kitcheniq/v1/scan/video/start`, {
                 method: 'POST',
                 headers: {
                     'X-WP-Nonce': this.nonce,
@@ -1979,31 +1979,70 @@ class KitchenIQDashboard {
                 body: scanForm,
             });
 
-            const data = await response.json();
+            const startData = await startResp.json();
+            if (!startResp.ok || !startData.success || !startData.scan_id) {
+                const errorMsg = startData.message || startData.error || `Error: ${startResp.status}`;
+                this.hideSkeleton('kiq-inventory-list');
+                this.showNotification(errorMsg, 'error');
+                return;
+            }
 
-            if (!response.ok) {
-                const errorMsg = data.message || data.error || `Error: ${response.status}`;
-                console.error('Video scan error:', response.status, data);
-                // Show more details if available
-                if (data.params_found) {
-                    console.error('Params found by server:', data.params_found);
+            const scanId = startData.scan_id;
+
+            // Poll status until done/error.
+            const poll = async () => {
+                const resp = await fetch(`${this.apiRoot}kitcheniq/v1/scan/video/status?scan_id=${encodeURIComponent(scanId)}`, {
+                    headers: { 'X-WP-Nonce': this.nonce },
+                });
+                const st = await resp.json();
+                if (!resp.ok || !st.success) {
+                    throw new Error(st.message || st.error || `Status error: ${resp.status}`);
                 }
-                if (data.suggestion) {
-                    this.showNotification(`${errorMsg}. ${data.suggestion}`, 'error');
+                return st;
+            };
+
+            const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+            let done = false;
+            while (!done) {
+                const st = await poll();
+
+                if (btn) btn.textContent = st.message ? st.message : 'Processing video...';
+
+                if (st.status === 'clarifying' && st.question) {
+                    // Interrupt: ask the user.
+                    const ans = window.prompt(st.question, 'ok');
+                    if (ans === null) {
+                        // user cancelled; keep waiting
+                        await sleep(1200);
+                        continue;
+                    }
+                    await fetch(`${this.apiRoot}kitcheniq/v1/scan/video/answer`, {
+                        method: 'POST',
+                        headers: {
+                            'X-WP-Nonce': this.nonce,
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ scan_id: scanId, answer: ans }),
+                    });
+                }
+
+                if (st.status === 'done' && st.result) {
+                    const data = st.result;
+                    this.inventory = this.postProcessInventory(data.inventory || []);
+                    this.hideSkeleton('kiq-inventory-list');
+                    this.renderInventory();
+                    const transcriptionNote = transcription ? ' (with audio)' : '';
+                    this.showNotification(`Added ${data.items_added} items from video${transcriptionNote}`, 'success');
+                    this.clearVideo();
+                    done = true;
+                } else if (st.status === 'error') {
+                    this.hideSkeleton('kiq-inventory-list');
+                    this.showNotification(st.message || 'Error processing video', 'error');
+                    done = true;
                 } else {
-                    this.showNotification(errorMsg, 'error');
+                    await sleep(1200);
                 }
-                this.hideSkeleton('kiq-inventory-list');
-            } else if (data.success) {
-                this.inventory = this.postProcessInventory(data.inventory || []);
-                this.hideSkeleton('kiq-inventory-list');
-                this.renderInventory();
-                const transcriptionNote = transcription ? ' (with audio)' : '';
-                this.showNotification(`Added ${data.items_added} items from video${transcriptionNote}`, 'success');
-                this.clearVideo();
-            } else {
-                this.hideSkeleton('kiq-inventory-list');
-                this.showNotification(data.error || 'Error processing video', 'error');
             }
         } catch (error) {
             console.error('Video scan error:', error);
