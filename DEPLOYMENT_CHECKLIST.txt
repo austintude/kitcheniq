@@ -22,6 +22,18 @@
 
 ---
 
+## Packaging / ZIP Build (Recommended)
+
+- [ ] Build a WP-safe ZIP (POSIX paths) from this repo:
+  - Run: `./build-plugin-zip.ps1 -Verify`
+  - Output: `kitchen-iq.zip` (top-level folder: `kitchen-iq/`)
+  - Why: prevents the "files extracted with literal \\ in names" failure on Linux hosts.
+
+- [ ] Deploy via WordPress Admin (preferred):
+  - Plugins → Add Plugin → Upload Plugin
+  - Choose `kitchen-iq.zip`
+  - If prompted: **Replace current with uploaded**
+
 ## Deployment Steps
 
 ### Step 1: Update Plugin Files (5 minutes)
