@@ -24,6 +24,17 @@ class KitchenIQDashboard {
         this.liveUsingRearCamera = true;
         this.liveTtsEnabled = false;
         this.liveLatestFrame = null;
+
+        // Video scan session state (Inventory -> Record video)
+        this.videoScan = {
+            scanId: null,
+            status: null,
+            message: null,
+            question: null,
+            waitingForAnswer: false,
+        };
+        this.videoScanPollTimer = null;
+
         this.stapleItems = [
             'salt',
             'pepper',
@@ -100,6 +111,9 @@ class KitchenIQDashboard {
 
         // Attach event listeners
         this.attachEventListeners();
+
+        // Resume any in-progress video scan session (persists across refreshes)
+        this.resumeVideoScanSession();
 
         // If we have a loaded profile, prefill household size and render members
         try {
@@ -447,6 +461,32 @@ class KitchenIQDashboard {
         const scanVideoBtn = document.getElementById('kiq-scan-video');
         if (scanVideoBtn) {
             scanVideoBtn.addEventListener('click', () => this.scanVideo());
+        }
+
+        // Video scan session (clarifications + resume)
+        const videoScanCancel = document.getElementById('kiq-video-scan-cancel');
+        if (videoScanCancel) {
+            videoScanCancel.addEventListener('click', () => this.clearVideoScanSession());
+        }
+        const videoClarifySend = document.getElementById('kiq-video-clarify-send');
+        if (videoClarifySend) {
+            videoClarifySend.addEventListener('click', () => {
+                const val = document.getElementById('kiq-video-clarify-input')?.value || '';
+                this.submitVideoScanAnswer(val);
+            });
+        }
+        const videoClarifyOk = document.getElementById('kiq-video-clarify-ok');
+        if (videoClarifyOk) {
+            videoClarifyOk.addEventListener('click', () => this.submitVideoScanAnswer('ok'));
+        }
+        const videoClarifyInput = document.getElementById('kiq-video-clarify-input');
+        if (videoClarifyInput) {
+            videoClarifyInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    this.submitVideoScanAnswer(videoClarifyInput.value || '');
+                }
+            });
         }
 
         // Live assist controls
@@ -1913,6 +1953,209 @@ class KitchenIQDashboard {
         }
     }
 
+    getVideoScanPanelEls() {
+        return {
+            panel: document.getElementById('kiq-video-scan-panel'),
+            thread: document.getElementById('kiq-video-scan-thread'),
+            cancelBtn: document.getElementById('kiq-video-scan-cancel'),
+            clarifyWrap: document.getElementById('kiq-video-clarify'),
+            clarifyQuestion: document.getElementById('kiq-video-clarify-question'),
+            clarifyInput: document.getElementById('kiq-video-clarify-input'),
+            clarifySend: document.getElementById('kiq-video-clarify-send'),
+            clarifyOk: document.getElementById('kiq-video-clarify-ok'),
+        };
+    }
+
+    appendVideoScanMessage(role, text) {
+        const els = this.getVideoScanPanelEls();
+        if (!els.thread) return;
+
+        if (els.thread.classList.contains('kiq-muted')) {
+            els.thread.classList.remove('kiq-muted');
+            els.thread.textContent = '';
+        }
+
+        const block = document.createElement('div');
+        block.className = 'kiq-live-message';
+        if (role === 'You' || role === 'User') block.classList.add('user');
+        if (role === 'KitchenIQ' || role === 'Coach') block.classList.add('coach');
+        if (role === 'System') block.classList.add('system');
+
+        block.innerHTML = `
+            <div class="kiq-live-message-sender">${role}</div>
+            <div>${String(text || '').replace(/\n/g, '<br/>')}</div>
+        `;
+        els.thread.appendChild(block);
+        els.thread.scrollTop = els.thread.scrollHeight;
+    }
+
+    showVideoScanPanel(show = true) {
+        const els = this.getVideoScanPanelEls();
+        if (els.panel) {
+            els.panel.style.display = show ? 'block' : 'none';
+        }
+    }
+
+    saveVideoScanSession(scanId) {
+        try {
+            const payload = {
+                scanId,
+                savedAt: Date.now(),
+            };
+            localStorage.setItem('kiq_video_scan_session', JSON.stringify(payload));
+        } catch (e) {}
+    }
+
+    clearVideoScanSession() {
+        try { localStorage.removeItem('kiq_video_scan_session'); } catch (e) {}
+        this.videoScan.scanId = null;
+        this.videoScan.status = null;
+        this.videoScan.question = null;
+        this.videoScan.message = null;
+        this.videoScan.waitingForAnswer = false;
+
+        if (this.videoScanPollTimer) {
+            clearTimeout(this.videoScanPollTimer);
+            this.videoScanPollTimer = null;
+        }
+
+        const els = this.getVideoScanPanelEls();
+        if (els.thread) {
+            els.thread.classList.add('kiq-muted');
+            els.thread.textContent = 'No scan in progress.';
+        }
+        if (els.clarifyWrap) {
+            els.clarifyWrap.style.display = 'none';
+        }
+
+        // Re-enable video controls
+        const scanBtn = document.getElementById('kiq-scan-video');
+        if (scanBtn) {
+            scanBtn.disabled = false;
+            scanBtn.textContent = 'Scan video + audio';
+        }
+        const videoBtn = document.getElementById('kiq-video-btn');
+        if (videoBtn) videoBtn.disabled = false;
+    }
+
+    resumeVideoScanSession() {
+        let stored = null;
+        try {
+            stored = JSON.parse(localStorage.getItem('kiq_video_scan_session') || 'null');
+        } catch (e) {
+            stored = null;
+        }
+
+        const scanId = stored && stored.scanId ? String(stored.scanId) : null;
+        if (!scanId) return;
+
+        // Show panel and resume polling.
+        this.videoScan.scanId = scanId;
+        this.showVideoScanPanel(true);
+        this.appendVideoScanMessage('System', 'Resuming video scan session...');
+        this.pollVideoScanStatus();
+    }
+
+    async pollVideoScanStatus() {
+        const scanId = this.videoScan.scanId;
+        if (!scanId) return;
+
+        // If we’re waiting for user input, don’t spam the server.
+        if (this.videoScan.waitingForAnswer) return;
+
+        const btn = document.getElementById('kiq-scan-video');
+
+        try {
+            const resp = await fetch(`${this.apiRoot}kitcheniq/v1/scan/video/status?scan_id=${encodeURIComponent(scanId)}`, {
+                headers: { 'X-WP-Nonce': this.nonce },
+            });
+            const st = await resp.json();
+            if (!resp.ok || !st.success) {
+                throw new Error(st.message || st.error || `Status error: ${resp.status}`);
+            }
+
+            if (st.message && st.message !== this.videoScan.message) {
+                this.videoScan.message = st.message;
+                if (btn && btn.disabled) btn.textContent = st.message;
+                this.appendVideoScanMessage('KitchenIQ', st.message);
+            }
+
+            if (st.status === 'clarifying' && st.question) {
+                this.videoScan.status = 'clarifying';
+                this.videoScan.question = st.question;
+                this.videoScan.waitingForAnswer = true;
+
+                const els = this.getVideoScanPanelEls();
+                this.showVideoScanPanel(true);
+                if (els.clarifyQuestion) els.clarifyQuestion.textContent = st.question;
+                if (els.clarifyWrap) els.clarifyWrap.style.display = 'block';
+                if (els.clarifyInput) {
+                    els.clarifyInput.value = '';
+                    els.clarifyInput.focus();
+                }
+                this.appendVideoScanMessage('System', 'Needs clarification. Reply below to continue.');
+                return;
+            }
+
+            if (st.status === 'done' && st.result) {
+                const data = st.result;
+                this.inventory = this.postProcessInventory(data.inventory || []);
+                this.hideSkeleton('kiq-inventory-list');
+                this.renderInventory();
+                this.showNotification(`Added ${data.items_added} items from video`, 'success');
+
+                // Cleanup session state
+                this.clearVideoScanSession();
+                this.clearVideo();
+                return;
+            }
+
+            if (st.status === 'error') {
+                this.hideSkeleton('kiq-inventory-list');
+                this.showNotification(st.message || 'Error processing video', 'error');
+                this.appendVideoScanMessage('System', st.message || 'Error processing video');
+                this.clearVideoScanSession();
+                return;
+            }
+
+        } catch (e) {
+            console.warn('Video scan status poll failed:', e);
+        }
+
+        // Continue polling.
+        this.videoScanPollTimer = setTimeout(() => this.pollVideoScanStatus(), 1200);
+    }
+
+    async submitVideoScanAnswer(answerRaw) {
+        const scanId = this.videoScan.scanId;
+        if (!scanId) return;
+
+        const ans = (answerRaw ?? '').toString().trim();
+        if (!ans) return;
+
+        const els = this.getVideoScanPanelEls();
+        if (els.clarifyWrap) els.clarifyWrap.style.display = 'none';
+
+        this.appendVideoScanMessage('You', ans);
+
+        try {
+            await fetch(`${this.apiRoot}kitcheniq/v1/scan/video/answer`, {
+                method: 'POST',
+                headers: {
+                    'X-WP-Nonce': this.nonce,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ scan_id: scanId, answer: ans }),
+            });
+        } catch (e) {
+            console.warn('Failed submitting video scan answer', e);
+        }
+
+        this.videoScan.waitingForAnswer = false;
+        // Resume polling immediately.
+        this.pollVideoScanStatus();
+    }
+
     async scanVideo() {
         if (!this.pendingVideo) {
             this.showNotification('No video selected. Record or select a video first.', 'error');
@@ -1989,71 +2232,38 @@ class KitchenIQDashboard {
 
             const scanId = startData.scan_id;
 
-            // Poll status until done/error.
-            const poll = async () => {
-                const resp = await fetch(`${this.apiRoot}kitcheniq/v1/scan/video/status?scan_id=${encodeURIComponent(scanId)}`, {
-                    headers: { 'X-WP-Nonce': this.nonce },
-                });
-                const st = await resp.json();
-                if (!resp.ok || !st.success) {
-                    throw new Error(st.message || st.error || `Status error: ${resp.status}`);
-                }
-                return st;
-            };
+            // Persist and start polling in the background.
+            this.videoScan.scanId = scanId;
+            this.videoScan.message = null;
+            this.videoScan.question = null;
+            this.videoScan.status = 'processing';
+            this.videoScan.waitingForAnswer = false;
 
-            const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+            this.saveVideoScanSession(scanId);
+            this.showVideoScanPanel(true);
+            this.appendVideoScanMessage('System', `Started video scan session (${scanId}). You can leave this tab and come back.`);
 
-            let done = false;
-            while (!done) {
-                const st = await poll();
+            // Kick off the poll loop (will stop on done/error/clarify).
+            this.pollVideoScanStatus();
 
-                if (btn) btn.textContent = st.message ? st.message : 'Processing video...';
-
-                if (st.status === 'clarifying' && st.question) {
-                    // Interrupt: ask the user.
-                    const ans = window.prompt(st.question, 'ok');
-                    if (ans === null) {
-                        // user cancelled; keep waiting
-                        await sleep(1200);
-                        continue;
-                    }
-                    await fetch(`${this.apiRoot}kitcheniq/v1/scan/video/answer`, {
-                        method: 'POST',
-                        headers: {
-                            'X-WP-Nonce': this.nonce,
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({ scan_id: scanId, answer: ans }),
-                    });
-                }
-
-                if (st.status === 'done' && st.result) {
-                    const data = st.result;
-                    this.inventory = this.postProcessInventory(data.inventory || []);
-                    this.hideSkeleton('kiq-inventory-list');
-                    this.renderInventory();
-                    const transcriptionNote = transcription ? ' (with audio)' : '';
-                    this.showNotification(`Added ${data.items_added} items from video${transcriptionNote}`, 'success');
-                    this.clearVideo();
-                    done = true;
-                } else if (st.status === 'error') {
-                    this.hideSkeleton('kiq-inventory-list');
-                    this.showNotification(st.message || 'Error processing video', 'error');
-                    done = true;
-                } else {
-                    await sleep(1200);
-                }
-            }
+            const transcriptionNote = transcription ? ' (with audio narration)' : '';
+            this.showNotification('Video uploaded — scanning' + transcriptionNote, 'success');
         } catch (error) {
             console.error('Video scan error:', error);
             this.showNotification('Error: ' + error.message, 'error');
             this.hideSkeleton('kiq-inventory-list');
         } finally {
+            // If a scan session is still active, keep the button disabled to prevent double-start.
+            const sessionActive = !!this.videoScan.scanId;
             if (btn) {
-                btn.textContent = originalText;
-                btn.disabled = false;
+                if (!sessionActive) {
+                    btn.textContent = originalText;
+                    btn.disabled = false;
+                } else {
+                    btn.disabled = true;
+                }
             }
-            if (videoBtn) videoBtn.disabled = false;
+            if (videoBtn) videoBtn.disabled = sessionActive;
         }
     }
 

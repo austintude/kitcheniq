@@ -355,6 +355,32 @@
                         </div>
                     </div>
 
+                    <!-- Video scan session (persists across page refresh/tab switches) -->
+                    <div id="kiq-video-scan-panel" class="kiq-card-surface" style="display:none; margin-top: 16px;">
+                        <div class="kiq-card-header">
+                            <div>
+                                <p class="kiq-eyebrow">Video scan</p>
+                                <h3>Scan session</h3>
+                                <p class="kiq-muted">If KitchenIQ isn’t confident, it’ll pause here for a quick confirmation and then continue.</p>
+                            </div>
+                            <div class="kiq-live-actions">
+                                <button id="kiq-video-scan-cancel" class="btn btn-ghost btn-sm" type="button">End session</button>
+                            </div>
+                        </div>
+                        <div id="kiq-video-scan-thread" class="kiq-live-thread kiq-muted" style="min-height:120px;">No scan in progress.</div>
+
+                        <div id="kiq-video-clarify" style="display:none; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--kiq-border);">
+                            <div class="kiq-muted" style="margin-bottom: 8px;">Clarification needed:</div>
+                            <div id="kiq-video-clarify-question" style="margin-bottom: 10px;"></div>
+                            <div style="display:flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                                <input id="kiq-video-clarify-input" type="text" placeholder="Type correction or 'ok'" style="flex: 1; min-width: 220px;" />
+                                <button id="kiq-video-clarify-send" class="btn btn-primary" type="button">Send</button>
+                                <button id="kiq-video-clarify-ok" class="btn btn-secondary" type="button">OK</button>
+                            </div>
+                            <p class="kiq-muted" style="margin-top: 8px;">Examples: “That’s oat milk, not almond”, “skip the jar”, “2 cartons of eggs”.</p>
+                        </div>
+                    </div>
+
                     <!-- Multi-photo preview gallery -->
                     <div id="kiq-photo-preview" class="kiq-photo-preview" style="display: none;">
                         <div class="kiq-photo-preview-header">
