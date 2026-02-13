@@ -558,10 +558,23 @@
                             <span id="kiq-live-status" class="kiq-muted">Tap Start to begin</span>
                         </div>
                         <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--kiq-border);">
-                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                                <input type="checkbox" id="kiq-live-tts-toggle" style="width: 16px; height: 16px;">
-                                <span class="kiq-muted" style="font-size: 0.9em;">Play Coach replies aloud (text-to-speech)</span>
-                            </label>
+                            <div style="display:flex; flex-direction:column; gap:10px;">
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                    <input type="checkbox" id="kiq-live-audio-toggle" style="width: 16px; height: 16px;" checked>
+                                    <span class="kiq-muted" style="font-size: 0.9em;">Audio replies (default)</span>
+                                </label>
+
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                    <input type="checkbox" id="kiq-live-handsfree-toggle" style="width: 16px; height: 16px;">
+                                    <span class="kiq-muted" style="font-size: 0.9em;">Hands-free (auto end turn on silence)</span>
+                                </label>
+
+                                <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                                    <span class="kiq-muted" style="font-size: 0.9em; min-width: 190px;">Silence timeout:</span>
+                                    <input type="range" id="kiq-live-silence-slider" min="600" max="3000" step="100" value="1200" style="flex:1; min-width:180px;" />
+                                    <span id="kiq-live-silence-label" class="kiq-muted" style="font-size:0.9em; min-width:120px;">1.2s</span>
+                                </div>
+                            </div>
                         </div>
                     </div>
 

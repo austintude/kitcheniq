@@ -195,7 +195,7 @@ class KIQ_REST {
             )
         );
 
-        // Audio transcription for video scanning
+        // Audio transcription (video scan + coach voice)
         register_rest_route(
             'kitcheniq/v1',
             '/transcribe-audio',
@@ -203,6 +203,22 @@ class KIQ_REST {
                 'methods'             => 'POST',
                 'callback'            => array( __CLASS__, 'handle_transcribe_audio' ),
                 'permission_callback' => array( __CLASS__, 'check_auth' ),
+            )
+        );
+
+        // Text-to-speech for Coach replies (returns audio)
+        register_rest_route(
+            'kitcheniq/v1',
+            '/tts',
+            array(
+                'methods'             => 'POST',
+                'callback'            => array( __CLASS__, 'handle_tts' ),
+                'permission_callback' => array( __CLASS__, 'check_auth' ),
+                'args'                => array(
+                    'text'  => array( 'type' => 'string', 'required' => true ),
+                    'voice' => array( 'type' => 'string' ),
+                    'format'=> array( 'type' => 'string' ),
+                ),
             )
         );
 
@@ -1786,13 +1802,21 @@ class KIQ_REST {
 
         // Check if files were uploaded
         $files = $request->get_file_params();
-        if ( empty( $files['video'] ) ) {
+        $file  = null;
+        if ( ! empty( $files['audio'] ) ) {
+            $file = $files['audio'];
+        } elseif ( ! empty( $files['video'] ) ) {
+            // Backwards-compatible field name.
+            $file = $files['video'];
+        }
+
+        if ( empty( $file ) ) {
             return new WP_REST_Response( array(
-                'error' => 'No video file provided',
+                'error' => 'No audio/video file provided',
             ), 400 );
         }
 
-        $video_file = $files['video'];
+        $video_file = $file;
 
         // Validate file
         if ( $video_file['error'] !== UPLOAD_ERR_OK ) {
@@ -1803,14 +1827,24 @@ class KIQ_REST {
 
         // Check file size (max 25MB for Whisper API)
         $max_size = 25 * 1024 * 1024;
-        if ( $video_file['size'] > $max_size ) {
+        if ( intval( $video_file['size'] ?? 0 ) > $max_size ) {
             return new WP_REST_Response( array(
-                'error' => 'Video file too large for audio transcription. Maximum 25MB.',
+                'error' => 'File too large for audio transcription. Maximum 25MB.',
             ), 400 );
         }
 
-        // Extract audio and transcribe using Whisper
-        $transcription = self::transcribe_video_audio( $video_file['tmp_name'] );
+        // Transcribe:
+        // - If this is a video, extract audio via ffmpeg first.
+        // - If it is already an audio file, send directly.
+        $mime = (string) ( $video_file['type'] ?? '' );
+        $tmp  = (string) ( $video_file['tmp_name'] ?? '' );
+        $transcription = '';
+
+        if ( strpos( $mime, 'video/' ) === 0 ) {
+            $transcription = self::transcribe_video_audio( $tmp );
+        } else {
+            $transcription = self::transcribe_audio_file( $tmp, $mime );
+        }
 
         if ( is_wp_error( $transcription ) ) {
             return new WP_REST_Response( array(
@@ -1913,6 +1947,143 @@ class KIQ_REST {
         }
 
         return isset( $data['text'] ) ? trim( $data['text'] ) : '';
+    }
+
+    /**
+     * Transcribe an audio file directly using OpenAI Whisper API.
+     */
+    private static function transcribe_audio_file( $audio_path, $mime = '' ) {
+        if ( ! KIQ_API_KEY || empty( KIQ_API_KEY ) ) {
+            return new WP_Error( 'missing_api_key', 'OpenAI API key not configured' );
+        }
+
+        if ( empty( $audio_path ) || ! file_exists( $audio_path ) ) {
+            return new WP_Error( 'missing_audio', 'Audio file missing on server' );
+        }
+
+        $audio_size = filesize( $audio_path );
+        if ( $audio_size < 200 ) {
+            return new WP_Error( 'no_audio', 'Audio file too small to transcribe' );
+        }
+
+        $boundary = wp_generate_password( 24, false );
+        $body     = '';
+
+        // Guess filename + content-type
+        $filename = 'audio';
+        $content_type = $mime ? $mime : 'application/octet-stream';
+        if ( strpos( $content_type, 'audio/' ) === 0 ) {
+            $ext = str_replace( 'audio/', '', $content_type );
+            $filename .= '.' . preg_replace( '/[^a-z0-9]+/i', '', $ext );
+        } else {
+            $filename .= '.webm';
+        }
+
+        $body .= "--{$boundary}\r\n";
+        $body .= "Content-Disposition: form-data; name=\"file\"; filename=\"{$filename}\"\r\n";
+        $body .= "Content-Type: {$content_type}\r\n\r\n";
+        $body .= file_get_contents( $audio_path );
+        $body .= "\r\n";
+
+        $body .= "--{$boundary}\r\n";
+        $body .= "Content-Disposition: form-data; name=\"model\"\r\n\r\n";
+        $body .= "whisper-1\r\n";
+
+        $body .= "--{$boundary}\r\n";
+        $body .= "Content-Disposition: form-data; name=\"prompt\"\r\n\r\n";
+        $body .= "This is someone talking to KitchenIQ Coach about their pantry, fridge, meals, groceries, and food items.\r\n";
+
+        $body .= "--{$boundary}--\r\n";
+
+        $response = wp_remote_post(
+            'https://api.openai.com/v1/audio/transcriptions',
+            array(
+                'headers' => array(
+                    'Authorization' => 'Bearer ' . KIQ_API_KEY,
+                    'Content-Type'  => 'multipart/form-data; boundary=' . $boundary,
+                ),
+                'body'    => $body,
+                'timeout' => 60,
+            )
+        );
+
+        if ( is_wp_error( $response ) ) {
+            return new WP_Error( 'whisper_api_error', $response->get_error_message() );
+        }
+
+        $status_code = wp_remote_retrieve_response_code( $response );
+        $body_text   = wp_remote_retrieve_body( $response );
+        $data        = json_decode( $body_text, true );
+
+        if ( $status_code !== 200 ) {
+            $error_msg = isset( $data['error']['message'] ) ? $data['error']['message'] : 'Whisper API error';
+            return new WP_Error( 'whisper_api_error', $error_msg );
+        }
+
+        return isset( $data['text'] ) ? trim( $data['text'] ) : '';
+    }
+
+    /**
+     * Text-to-speech endpoint for Coach.
+     * Returns base64-encoded audio (mp3 by default).
+     */
+    public static function handle_tts( $request ) {
+        if ( ! KIQ_API_KEY || empty( KIQ_API_KEY ) ) {
+            return new WP_REST_Response( array( 'error' => 'missing_api_key', 'message' => 'OpenAI API key not configured' ), 400 );
+        }
+
+        $params = $request->get_json_params();
+        $text   = sanitize_textarea_field( $params['text'] ?? '' );
+        $voice  = sanitize_text_field( $params['voice'] ?? 'alloy' );
+        $format = sanitize_text_field( $params['format'] ?? 'mp3' );
+
+        if ( $text === '' ) {
+            return new WP_REST_Response( array( 'error' => 'missing_text', 'message' => 'Missing text' ), 400 );
+        }
+
+        // Keep responses short-ish to avoid huge payloads.
+        if ( strlen( $text ) > 1200 ) {
+            $text = substr( $text, 0, 1200 );
+        }
+
+        $payload = array(
+            'model'  => 'gpt-4o-mini-tts',
+            'voice'  => $voice,
+            'format' => $format,
+            'input'  => $text,
+        );
+
+        $res = wp_remote_post(
+            'https://api.openai.com/v1/audio/speech',
+            array(
+                'headers' => array(
+                    'Authorization' => 'Bearer ' . KIQ_API_KEY,
+                    'Content-Type'  => 'application/json',
+                ),
+                'body'    => wp_json_encode( $payload ),
+                'timeout' => 60,
+            )
+        );
+
+        if ( is_wp_error( $res ) ) {
+            return new WP_REST_Response( array( 'error' => 'tts_error', 'message' => $res->get_error_message() ), 500 );
+        }
+
+        $code = wp_remote_retrieve_response_code( $res );
+        $bin  = wp_remote_retrieve_body( $res );
+
+        if ( $code !== 200 || empty( $bin ) ) {
+            return new WP_REST_Response( array( 'error' => 'tts_error', 'message' => 'TTS request failed', 'http' => $code ), 500 );
+        }
+
+        return new WP_REST_Response(
+            array(
+                'success'     => true,
+                'contentType' => $format === 'wav' ? 'audio/wav' : 'audio/mpeg',
+                'audio_base64'=> base64_encode( $bin ),
+            ),
+            200
+        );
     }
 
     /**

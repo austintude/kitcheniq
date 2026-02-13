@@ -22,8 +22,21 @@ class KitchenIQDashboard {
         this.liveSessionActive = false;
         this.liveAutoFrameInterval = null;
         this.liveUsingRearCamera = true;
-        this.liveTtsEnabled = false;
+
+        // Coach audio UX
+        this.liveAudioEnabled = true;       // audio replies
+        this.liveHandsFree = false;         // auto-end on silence
+        this.liveSilenceMs = 1200;          // default end-of-turn silence
         this.liveLatestFrame = null;
+
+        // MediaRecorder state
+        this.liveAudioStream = null;
+        this.liveMediaRecorder = null;
+        this.liveAudioChunks = [];
+        this.liveRecording = false;
+        this.liveMeterRaf = null;
+        this.liveLastLoudTs = 0;
+        this.liveCurrentPlayback = null;
 
         // Video scan session state (Inventory -> Record video)
         this.videoScan = {
@@ -126,6 +139,19 @@ class KitchenIQDashboard {
         } catch (err) {
             // ignore if DOM not ready
         }
+
+        // Load Coach prefs
+        try {
+            const ae = localStorage.getItem('kiq_live_audio_enabled');
+            if (ae !== null) this.liveAudioEnabled = ae === '1';
+            const hf = localStorage.getItem('kiq_live_handsfree');
+            if (hf !== null) this.liveHandsFree = hf === '1';
+            const sm = localStorage.getItem('kiq_live_silence_ms');
+            if (sm) {
+                const ms = parseInt(sm, 10);
+                if (isFinite(ms) && ms >= 400 && ms <= 8000) this.liveSilenceMs = ms;
+            }
+        } catch (e) {}
 
         // PWA registration now happens in constructor via registerServiceWorker()
     }
@@ -506,12 +532,37 @@ class KitchenIQDashboard {
         if (livePttBtn) {
             livePttBtn.addEventListener('click', () => this.toggleLiveAudio());
         }
-        const liveTtsToggle = document.getElementById('kiq-live-tts-toggle');
-        if (liveTtsToggle) {
-            liveTtsToggle.addEventListener('change', (e) => {
-                this.liveTtsEnabled = e.target.checked;
+        const liveAudioToggle = document.getElementById('kiq-live-audio-toggle');
+        if (liveAudioToggle) {
+            liveAudioToggle.addEventListener('change', (e) => {
+                this.liveAudioEnabled = !!e.target.checked;
+                try { localStorage.setItem('kiq_live_audio_enabled', this.liveAudioEnabled ? '1' : '0'); } catch (err) {}
             });
         }
+
+        const liveHandsFreeToggle = document.getElementById('kiq-live-handsfree-toggle');
+        if (liveHandsFreeToggle) {
+            liveHandsFreeToggle.addEventListener('change', (e) => {
+                this.liveHandsFree = !!e.target.checked;
+                try { localStorage.setItem('kiq_live_handsfree', this.liveHandsFree ? '1' : '0'); } catch (err) {}
+            });
+        }
+
+        const silenceSlider = document.getElementById('kiq-live-silence-slider');
+        const silenceLabel = document.getElementById('kiq-live-silence-label');
+        const updateSilenceLabel = () => {
+            if (!silenceSlider) return;
+            const ms = parseInt(silenceSlider.value || '1200', 10);
+            this.liveSilenceMs = isFinite(ms) ? ms : 1200;
+            if (silenceLabel) silenceLabel.textContent = (this.liveSilenceMs / 1000).toFixed(1) + 's';
+            try { localStorage.setItem('kiq_live_silence_ms', String(this.liveSilenceMs)); } catch (err) {}
+        };
+        if (silenceSlider) {
+            silenceSlider.addEventListener('input', updateSilenceLabel);
+            silenceSlider.addEventListener('change', updateSilenceLabel);
+        }
+        // Initialize label
+        updateSilenceLabel();
 
         // Menu toggle
         const menuToggle = document.getElementById('kiq-menu-toggle');
@@ -1360,160 +1411,255 @@ class KitchenIQDashboard {
         this.liveThreadEl.scrollTop = this.liveThreadEl.scrollHeight;
     }
 
+    stopCoachPlayback() {
+        try {
+            if (this.liveCurrentPlayback) {
+                this.liveCurrentPlayback.pause();
+                this.liveCurrentPlayback.src = '';
+                this.liveCurrentPlayback = null;
+            }
+        } catch (e) {}
+    }
+
+    async playCoachTts(text) {
+        if (!this.liveAudioEnabled) return;
+        if (!text) return;
+
+        try {
+            const res = await fetch(`${this.apiRoot}kitcheniq/v1/tts`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-WP-Nonce': this.nonce,
+                },
+                body: JSON.stringify({ text, voice: 'alloy', format: 'mp3' }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success || !data.audio_base64) return;
+
+            const bin = atob(data.audio_base64);
+            const bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+
+            const blob = new Blob([bytes], { type: data.contentType || 'audio/mpeg' });
+            const url = URL.createObjectURL(blob);
+
+            this.stopCoachPlayback();
+
+            const a = new Audio(url);
+            this.liveCurrentPlayback = a;
+
+            // When playback ends, re-arm hands-free capture.
+            a.addEventListener('ended', () => {
+                try { URL.revokeObjectURL(url); } catch (e) {}
+                if (this.liveHandsFree && this.liveSessionActive) {
+                    // Auto-start a new turn
+                    this.toggleLiveAudio();
+                }
+            });
+
+            a.play().catch(() => {});
+        } catch (e) {
+            // non-fatal
+        }
+    }
+
+    async startCoachRecording() {
+        if (this.liveRecording) return;
+
+        // Barge-in: stop any playback immediately.
+        this.stopCoachPlayback();
+
+        if (!navigator.mediaDevices?.getUserMedia) {
+            this.setLiveStatus('Mic not supported on this device');
+            return;
+        }
+
+        this.setLiveStatus('Requesting microphone…');
+
+        try {
+            // Get mic stream
+            this.liveAudioStream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true,
+                },
+            });
+
+            this.liveAudioChunks = [];
+            const mr = new MediaRecorder(this.liveAudioStream);
+            this.liveMediaRecorder = mr;
+            this.liveRecording = true;
+            this.liveLastLoudTs = Date.now();
+            this.liveRecognizing = true;
+
+            // Update button UI
+            const talkBtn = document.getElementById('kiq-live-ptt');
+            if (talkBtn) {
+                talkBtn.classList.add('listening');
+                talkBtn.textContent = this.liveHandsFree ? 'Listening…' : 'Stop';
+            }
+
+            // Auto-frame capture every 8 seconds while recording
+            this.liveAutoFrameInterval = setInterval(async () => {
+                await this.captureLiveFrame();
+            }, 8000);
+
+            mr.addEventListener('dataavailable', (ev) => {
+                if (ev.data && ev.data.size > 0) this.liveAudioChunks.push(ev.data);
+            });
+
+            mr.addEventListener('stop', async () => {
+                // stop tracks
+                try { this.liveAudioStream?.getTracks()?.forEach(t => t.stop()); } catch (e) {}
+                this.liveAudioStream = null;
+
+                if (this.liveAutoFrameInterval) {
+                    clearInterval(this.liveAutoFrameInterval);
+                    this.liveAutoFrameInterval = null;
+                }
+
+                const talkBtn2 = document.getElementById('kiq-live-ptt');
+                if (talkBtn2) {
+                    talkBtn2.classList.remove('listening');
+                    talkBtn2.textContent = 'Talk to KitchenIQ Coach';
+                }
+
+                const blob = new Blob(this.liveAudioChunks, { type: mr.mimeType || 'audio/webm' });
+                this.liveAudioChunks = [];
+
+                // If blob is tiny, just bail.
+                if (!blob || blob.size < 500) {
+                    this.setLiveStatus('No speech detected — try again');
+                    return;
+                }
+
+                this.setLiveStatus('Transcribing…');
+                const transcript = await this.transcribeCoachAudio(blob);
+                if (!transcript) {
+                    this.setLiveStatus('Could not transcribe — try again');
+                    return;
+                }
+
+                this.setLiveStatus('Sending to Coach…');
+                const frame = await this.captureLiveFrame();
+                await this.sendLiveAssist(transcript, frame);
+            });
+
+            mr.start(250);
+            this.setLiveStatus(this.liveHandsFree ? `Listening… (ends after ${(this.liveSilenceMs/1000).toFixed(1)}s silence)` : 'Recording…');
+
+            // If hands-free: monitor silence and auto-stop
+            if (this.liveHandsFree) {
+                this.monitorCoachSilence();
+            }
+
+        } catch (e) {
+            console.error('Mic start failed', e);
+            this.setLiveStatus('Mic permission denied / unavailable');
+            this.liveRecording = false;
+        }
+    }
+
+    async stopCoachRecording() {
+        if (!this.liveRecording) return;
+        this.liveRecording = false;
+
+        if (this.liveMeterRaf) {
+            cancelAnimationFrame(this.liveMeterRaf);
+            this.liveMeterRaf = null;
+        }
+
+        try {
+            if (this.liveMediaRecorder && this.liveMediaRecorder.state !== 'inactive') {
+                this.liveMediaRecorder.stop();
+            }
+        } catch (e) {}
+    }
+
+    monitorCoachSilence() {
+        // Very light RMS-based silence detector.
+        try {
+            if (!this.liveAudioStream) return;
+            const ac = new (window.AudioContext || window.webkitAudioContext)();
+            const src = ac.createMediaStreamSource(this.liveAudioStream);
+            const analyser = ac.createAnalyser();
+            analyser.fftSize = 2048;
+            src.connect(analyser);
+            const buf = new Uint8Array(analyser.fftSize);
+
+            const threshold = 0.02; // RMS threshold; tweak later
+            const tick = () => {
+                if (!this.liveRecording) {
+                    try { ac.close(); } catch (e) {}
+                    return;
+                }
+
+                analyser.getByteTimeDomainData(buf);
+                let sumSq = 0;
+                for (let i = 0; i < buf.length; i++) {
+                    const v = (buf[i] - 128) / 128;
+                    sumSq += v * v;
+                }
+                const rms = Math.sqrt(sumSq / buf.length);
+
+                const now = Date.now();
+                if (rms > threshold) {
+                    this.liveLastLoudTs = now;
+                }
+
+                const silentFor = now - (this.liveLastLoudTs || now);
+                if (silentFor >= this.liveSilenceMs) {
+                    this.stopCoachRecording();
+                    try { ac.close(); } catch (e) {}
+                    return;
+                }
+
+                this.liveMeterRaf = requestAnimationFrame(tick);
+            };
+
+            this.liveMeterRaf = requestAnimationFrame(tick);
+        } catch (e) {
+            // If silence detection fails, we just keep recording until user stops.
+        }
+    }
+
+    async transcribeCoachAudio(blob) {
+        try {
+            const fd = new FormData();
+            fd.append('audio', blob, 'coach.webm');
+
+            const res = await fetch(`${this.apiRoot}kitcheniq/v1/transcribe-audio`, {
+                method: 'POST',
+                headers: {
+                    'X-WP-Nonce': this.nonce,
+                },
+                body: fd,
+            });
+
+            const data = await res.json();
+            if (!res.ok) return '';
+            return (data.transcription || '').trim();
+        } catch (e) {
+            return '';
+        }
+    }
+
     async toggleLiveAudio() {
         if (!this.liveSessionActive) {
             this.setLiveStatus('Start camera first');
             return;
         }
 
-        const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-        // Toggle off if already listening
-        if (this.liveRecognizing && this.liveRecognizer) {
-            try {
-                this.liveRecognizer.stop();
-                if (this.liveAutoFrameInterval) {
-                    clearInterval(this.liveAutoFrameInterval);
-                    this.liveAutoFrameInterval = null;
-                }
-                this.setLiveStatus('Processing Coach response...');
-            } catch (e) {
-                console.error('Error stopping recognition:', e);
-            }
-            this.liveRecognizing = false;
+        // Toggle recording
+        if (this.liveRecording) {
+            this.setLiveStatus('Processing…');
+            await this.stopCoachRecording();
             return;
         }
 
-        // Fallback to text prompt if speech recognition is unavailable
-        if (!Recognition) {
-            console.warn('SpeechRecognition API not available');
-            const transcript = window.prompt('Speech recognition not supported. Type your request for KIQ Coach:');
-            if (transcript) {
-                await this.sendLiveAssist(transcript);
-            }
-            return;
-        }
-
-        try {
-            const recognizer = new Recognition();
-            recognizer.continuous = true;  // Changed to true: don't auto-stop on pauses
-            recognizer.interimResults = true;
-            recognizer.lang = 'en-US';
-            recognizer.maxAlternatives = 1;
-
-            let finalTranscript = '';
-            this.liveRecognizing = true;
-            this.liveRecognizer = recognizer;
-            this.setLiveStatus('Listening... (click "Stop listening" when done)');
-            
-            console.log('Speech recognition started in continuous mode');
-            
-            // Update button state
-            const talkBtn = document.getElementById('kiq-live-ptt');
-            if (talkBtn) {
-                talkBtn.classList.add('listening');
-                talkBtn.textContent = 'Stop listening';
-            }
-
-            // Start auto-frame capture every 8 seconds
-            this.liveAutoFrameInterval = setInterval(async () => {
-                await this.captureLiveFrame();
-            }, 8000);
-
-            recognizer.onstart = () => {
-                console.log('Speech recognition onstart event fired');
-            };
-
-            recognizer.onresult = (event) => {
-                console.log('onresult event:', event.results.length, 'results, isFinal:', event.results[event.results.length - 1]?.isFinal);
-                let interim = '';
-                for (let i = event.resultIndex; i < event.results.length; i++) {
-                    const result = event.results[i];
-                    if (result.isFinal) {
-                        finalTranscript += result[0].transcript + ' ';
-                    } else {
-                        interim += result[0].transcript;
-                    }
-                }
-                const heard = (finalTranscript + ' ' + interim).trim();
-                if (heard) {
-                    this.setLiveStatus(`Heard: ${heard}`);
-                }
-            };
-
-            recognizer.onerror = (event) => {
-                console.error('Speech recognition error:', event.error);
-                this.liveRecognizing = false;
-                if (this.liveAutoFrameInterval) {
-                    clearInterval(this.liveAutoFrameInterval);
-                    this.liveAutoFrameInterval = null;
-                }
-                
-                let errorMsg = 'Microphone error';
-                if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-                    errorMsg = 'Mic blocked - enable in browser settings';
-                } else if (event.error === 'network') {
-                    errorMsg = 'Network error - check connection';
-                } else if (event.error === 'no-speech') {
-                    errorMsg = 'No speech detected - try again';
-                } else if (event.error === 'audio-capture') {
-                    errorMsg = 'Mic not accessible - check permissions';
-                }
-                
-                this.setLiveStatus(errorMsg);
-                const talkBtn = document.getElementById('kiq-live-ptt');
-                if (talkBtn) {
-                    talkBtn.classList.remove('listening');
-                    talkBtn.textContent = 'Talk to KitchenIQ Coach';
-                }
-            };
-
-            recognizer.onend = async () => {
-                console.log('Speech recognition onend event, finalTranscript:', finalTranscript);
-                
-                // Check if this was an unexpected stop (user didn't click stop button)
-                const wasStillRecognizing = this.liveRecognizing;
-                const text = (finalTranscript || '').trim();
-                
-                this.liveRecognizing = false;
-                if (this.liveAutoFrameInterval) {
-                    clearInterval(this.liveAutoFrameInterval);
-                    this.liveAutoFrameInterval = null;
-                }
-                const talkBtn = document.getElementById('kiq-live-ptt');
-                if (talkBtn) {
-                    talkBtn.classList.remove('listening');
-                    talkBtn.textContent = 'Talk to KitchenIQ Coach';
-                }
-                
-                // If we have text, send it
-                if (text) {
-                    this.setLiveStatus('Sending to Coach...');
-                    const frame = await this.captureLiveFrame();
-                    await this.sendLiveAssist(text, frame);
-                } else {
-                    // No text captured
-                    if (wasStillRecognizing) {
-                        // Unexpected stop - likely browser timeout or interruption
-                        this.setLiveStatus('Recognition stopped - click Talk to restart');
-                        console.warn('Speech recognition stopped unexpectedly with no text');
-                    } else {
-                        // User manually stopped
-                        this.setLiveStatus('No speech detected - try again');
-                    }
-                }
-            };
-
-            recognizer.start();
-            console.log('Recognition.start() called');
-        } catch (err) {
-            console.error('Speech recognition exception:', err);
-            this.liveRecognizing = false;
-            const transcript = window.prompt('Error with speech recognition. Type your request for KIQ Coach:');
-            if (transcript) {
-                await this.sendLiveAssist(transcript);
-            }
-        }
+        await this.startCoachRecording();
     }
 
     /**
@@ -1667,20 +1813,9 @@ class KitchenIQDashboard {
                 }
             }
             
-            // Optionally play TTS if enabled
-            if (this.liveTtsEnabled && 'speechSynthesis' in window) {
-                try {
-                    const utterance = new SpeechSynthesisUtterance(msg);
-                    utterance.rate = 1.0;
-                    utterance.pitch = 1.0;
-                    speechSynthesis.cancel(); // Clear any pending utterances
-                    speechSynthesis.speak(utterance);
-                    console.log('TTS playback started');
-                } catch (err) {
-                    console.warn('TTS failed', err);
-                }
-            }
-            
+            // Play audio reply (OpenAI voice) if enabled
+            await this.playCoachTts(msg);
+
             this.setLiveStatus('Ready to talk');
         } catch (err) {
             console.error('Live assist error:', err);
