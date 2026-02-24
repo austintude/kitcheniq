@@ -1792,7 +1792,7 @@ class KIQ_REST {
 
         // Ensure user has access
         if ( ! KIQ_Features::allows( $user_id, 'store_mode' ) ) {
-            // If no explicit feature gate, allow by default
+            return new WP_REST_Response( array( 'error' => 'Store Mode is not available on your current plan.' ), 403 );
         }
 
         $recs = KIQ_Data::compute_store_recommendations( $user_id );
