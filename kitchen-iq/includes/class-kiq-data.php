@@ -608,4 +608,189 @@ class KIQ_Data {
             error_log( sprintf( 'KIQ: apply_meal_to_inventory complete - user_id=%d inventory_count=%d', intval( $user_id ), count( $inventory ) ) );
         }
     }
+
+    /**
+     * Get latest meal history record for a user
+     * Returns associative array with decoded meals and shopping_list or empty array
+     */
+    public static function get_latest_meal_history( $user_id ) {
+        global $wpdb;
+        $table_name = $wpdb->prefix . 'kiq_meal_history';
+
+        $row = $wpdb->get_row(
+            $wpdb->prepare(
+                "SELECT * FROM {$table_name} WHERE user_id = %d ORDER BY created_at DESC, id DESC LIMIT 1",
+                $user_id
+            ),
+            ARRAY_A
+        );
+
+        if ( ! $row ) {
+            return array();
+        }
+
+        $row['meals'] = array();
+        $row['shopping_list'] = array();
+        if ( ! empty( $row['meals_json'] ) ) {
+            $decoded = json_decode( $row['meals_json'], true );
+            if ( is_array( $decoded ) ) {
+                $row['meals'] = $decoded;
+            }
+        }
+        if ( ! empty( $row['shopping_list_json'] ) ) {
+            $decoded = json_decode( $row['shopping_list_json'], true );
+            if ( is_array( $decoded ) ) {
+                $row['shopping_list'] = $decoded;
+            }
+        }
+
+        return $row;
+    }
+
+    /**
+     * Compute store recommendations: minimal buy list, substitutions, and prioritize soon-to-expire items.
+     * Returns array(
+     *  'buy_list' => [ { name, quantity, reason, substitutions: [] } ],
+     *  'prioritize' => [items expiring soon],
+     *  'in_pantry' => [shopping items already covered]
+     * )
+     */
+    public static function compute_store_recommendations( $user_id ) {
+        // Ensure statuses/decay updated
+        self::refresh_inventory_status( $user_id );
+
+        $inventory = self::get_inventory( $user_id );
+        $latest    = self::get_latest_meal_history( $user_id );
+        $shopping  = array();
+
+        // Normalize shopping list shape to array of { name, quantity }
+        if ( isset( $latest['shopping_list'] ) && is_array( $latest['shopping_list'] ) ) {
+            foreach ( $latest['shopping_list'] as $entry ) {
+                if ( is_string( $entry ) ) {
+                    $shopping[] = array( 'name' => $entry, 'quantity' => 1 );
+                } elseif ( is_array( $entry ) ) {
+                    $shopping[] = array(
+                        'name'     => $entry['name'] ?? ($entry['item'] ?? ''),
+                        'quantity' => isset( $entry['quantity'] ) ? floatval( $entry['quantity'] ) : 1,
+                        'category' => $entry['category'] ?? null,
+                    );
+                }
+            }
+        }
+
+        // Build quick lookups
+        $inv_by_name = array();
+        foreach ( $inventory as $it ) {
+            $name = strtolower( trim( $it['name'] ?? '' ) );
+            if ( $name !== '' ) {
+                $inv_by_name[ $name ] = $it;
+            }
+        }
+
+        // Helpers
+        $is_fresh_enough = function( $item ) {
+            $decay = isset( $item['decay_score'] ) ? floatval( $item['decay_score'] ) : 0;
+            return $decay < 70 && ( $item['status'] ?? 'fresh' ) !== 'expired';
+        };
+
+        $similar_candidates = function( $missing, $inventory_items ) {
+            $cand = array();
+            $missing_cat = $missing['category'] ?? null;
+            foreach ( $inventory_items as $it ) {
+                $ok = true;
+                if ( $missing_cat && isset( $it['category'] ) && $it['category'] !== $missing_cat ) {
+                    $ok = false;
+                }
+                if ( $ok ) {
+                    $cand[] = array(
+                        'name'      => $it['name'] ?? '',
+                        'category'  => $it['category'] ?? null,
+                        'location'  => $it['location'] ?? null,
+                        'decay'     => $it['decay_score'] ?? 0,
+                        'status'    => $it['status'] ?? 'fresh',
+                    );
+                }
+            }
+            // Sort by lowest decay (use sooner)
+            usort( $cand, function( $a, $b ) {
+                return ($a['decay'] <=> $b['decay']);
+            } );
+            return array_slice( $cand, 0, 5 );
+        };
+
+        $buy_list   = array();
+        $in_pantry  = array();
+
+        foreach ( $shopping as $need ) {
+            $name = strtolower( trim( $need['name'] ?? '' ) );
+            if ( $name === '' ) {
+                continue;
+            }
+
+            $qty = isset( $need['quantity'] ) ? floatval( $need['quantity'] ) : 1;
+            $reason = 'missing';
+
+            if ( isset( $inv_by_name[ $name ] ) ) {
+                $inv_item = $inv_by_name[ $name ];
+                // If expired, treat as buy
+                if ( ( $inv_item['status'] ?? '' ) === 'expired' || ( $inv_item['decay_score'] ?? 0 ) >= 90 ) {
+                    $reason = 'expired';
+                } else {
+                    // Consider quantity: if quantity present and < 1, treat as low
+                    $inv_qty = isset( $inv_item['quantity'] ) ? floatval( $inv_item['quantity'] ) : 1;
+                    if ( $inv_qty >= $qty && $is_fresh_enough( $inv_item ) ) {
+                        $in_pantry[] = array(
+                            'name' => $inv_item['name'],
+                            'quantity' => $qty,
+                            'location' => $inv_item['location'] ?? 'pantry',
+                        );
+                        continue;
+                    } else {
+                        $reason = 'low';
+                    }
+                }
+            }
+
+            // Build substitutions from fresh inventory of same category or general
+            $fresh_candidates = array_filter( $inventory, function( $it ) use ( $is_fresh_enough ) {
+                return $is_fresh_enough( $it );
+            } );
+            $subs = $similar_candidates( $need, $fresh_candidates );
+
+            $buy_list[] = array(
+                'name'         => $need['name'],
+                'quantity'     => $qty,
+                'reason'       => $reason,
+                'substitutions'=> $subs,
+            );
+        }
+
+        // Prioritize soon-to-expire items (decay 70-89)
+        $prioritize = array();
+        foreach ( $inventory as $it ) {
+            $decay = isset( $it['decay_score'] ) ? floatval( $it['decay_score'] ) : 0;
+            if ( $decay >= 70 && $decay < 90 ) {
+                $prioritize[] = array(
+                    'name'      => $it['name'] ?? '',
+                    'location'  => $it['location'] ?? 'pantry',
+                    'category'  => $it['category'] ?? 'other',
+                    'decay'     => $decay,
+                    'status'    => $it['status'] ?? 'nearing',
+                );
+            }
+        }
+
+        // Sort prioritize by highest decay first
+        usort( $prioritize, function( $a, $b ) {
+            return ($b['decay'] <=> $a['decay']);
+        } );
+
+        return array(
+            'buy_list'  => $buy_list,
+            'prioritize'=> $prioritize,
+            'in_pantry' => $in_pantry,
+            'plan_type' => $latest['plan_type'] ?? null,
+            'created_at'=> $latest['created_at'] ?? null,
+        );
+    }
 }

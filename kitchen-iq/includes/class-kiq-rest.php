@@ -335,6 +335,17 @@ class KIQ_REST {
                 'permission_callback' => array( __CLASS__, 'check_auth' ),
             )
         );
+
+        // Store Mode: recommendations for shopping
+        register_rest_route(
+            'kitcheniq/v1',
+            '/store-mode/recommendations',
+            array(
+                'methods'             => 'GET',
+                'callback'            => array( __CLASS__, 'handle_store_mode_recommendations' ),
+                'permission_callback' => array( __CLASS__, 'check_auth' ),
+            )
+        );
     }
 
     /**
@@ -2181,6 +2192,13 @@ class KIQ_REST {
             ) );
         }
 
+        // Voice shortcut: "I'm at the store" triggers store mode
+        if ( preg_match( '/\b(i\'m|im)\s+at\s+the\s+store\b/i', $transcript ) || preg_match( '/\bstore\s+mode\b/i', $transcript ) ) {
+            self::send_sse_event( 'store_mode', array(
+                'message' => 'Opening Store Mode with recommendations…',
+            ) );
+        }
+
         // Send completion event
         self::send_sse_event( 'done', array( 'message' => 'Voice input processed.' ) );
 
@@ -2371,5 +2389,20 @@ class KIQ_REST {
         $filtered = KIQ_Data::filter_inventory_by_freshness( $user_id );
 
         return new WP_REST_Response( $filtered, 200 );
+    }
+
+    /**
+     * Store Mode: compute recommendations for shopping based on latest plan and current inventory.
+     */
+    public static function handle_store_mode_recommendations( $request ) {
+        $user_id = get_current_user_id();
+
+        // Ensure user has access
+        if ( ! KIQ_Features::allows( $user_id, 'store_mode' ) ) {
+            return new WP_REST_Response( array( 'error' => 'Store Mode is not available on your current plan.' ), 403 );
+        }
+
+        $recs = KIQ_Data::compute_store_recommendations( $user_id );
+        return new WP_REST_Response( $recs, 200 );
     }
 }
